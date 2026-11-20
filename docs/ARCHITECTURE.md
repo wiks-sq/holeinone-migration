@@ -41,6 +41,15 @@ Storage: `wp-content/hio-migration/{work,backups,import}`. Uninstalling the plug
 
 ## Tested
 
+**A real 5.2 GB WooCommerce site** (WordPress 6.8, PHP 8.2, MySQL 8.4): 1.35 GB of files and a 4.1 GB database with 6.9 million rows in 85 tables, mostly TranslatePress dictionaries. It runs WooCommerce, Elementor Pro, TranslatePress, All in One SEO, Prime Mover, Object Cache Pro and about 20 other plugins. Test host limits: 5 s time limit, 2 MB upload limit.
+- Imported its 1.0.0 ZIP archive from the FTP folder while PHP workers were killed 10 times: 15.8 minutes, 342 requests. All 37,767 files were byte-identical to the archive. Every one of the 6,906,221 database rows was either identical or changed only by the intended address/prefix replacement (checked row by row against the archive's SQL).
+- Exported the migrated site again (tar.gz, 1.1 GB, PHP killed 8 times: 6.3 minutes) and imported that into a third site (6 crashes). All 37,878 files and all database rows matched, apart from the intended address change. A ZIP export of the same site (4.8 GB, ZIP64) passed a full CRC check.
+- This test found and fixed three bugs (see the 1.0.2 changelog): a must-use plugin that hard-codes the site address logged the user out halfway through the import; a translation plugin's "/en" address ended up in the manifest; and the SQL file did not declare its character set.
+
+**A real 1.1 GB Elementor site** (WordPress 7.0, PHP 8.5, MySQL 8.4) with Patchstack, WP Rocket, Rank Math, Post SMTP and its old host's must-use plugins. Imported its 1.0.0 tar.gz archive by chunked browser upload into WordPress 7.1 on PHP 8.5: 38 seconds. All 14,457 files byte-identical; all 239,170 database rows identical or changed only by the intended address/prefix replacement. Then a new export with PHP killed every 4 seconds (40 crashes in 53 requests) and an import of it into a third site the same way (56 crashes in 64 requests, plus 4 interrupted upload chunks): all files and rows matched. The admin page ran in Chrome with all the site's plugins active, with no JavaScript errors.
+
+**Synthetic large sites:**
+
 **4.3 GB database, PHP 8.5, low limits** (`max_execution_time = 5`, `memory_limit = 64M` that WordPress may not raise, 2 MB upload limit; MySQL 8 → MariaDB 10.6; different URL and table prefix). The data was 1M posts, 4M postmeta rows (some serialized) and 2M term relationships (multi-column key). PHP workers were killed with `kill -9` during the export (3×) and the import (10×). Export: 3.3 GB SQL dump in 33 requests. Import: 8.4 minutes, 1,050,007 rows updated by search & replace. Checksums of all big tables were identical between source and target, apart from the intended URL change. No PHP warnings or deprecations with `WP_DEBUG` on.
 
 **5.2 GB of files, PHP 8.5, same limits**, including a single 4.3 GB file (ZIP64): tar.gz with browser-style upload in 2,783 chunks, and ZIP imported from the FTP folder while PHP workers were killed 12 times. File checksums identical.

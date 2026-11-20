@@ -5,7 +5,7 @@ Tags: migration, migrate, move site, backup, clone
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.1
+Stable tag: 1.0.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -94,6 +94,12 @@ In `wp-content/hio-migration/backups/` under long random file names that cannot 
 Edit `HIO_BUYMEACOFFEE_URL` at the top of `holeinone-migration.php`, define it in `wp-config.php`, or use the `hio_buymeacoffee_url` filter. An empty string hides the box.
 
 == Changelog ==
+
+= 1.0.2 =
+* Fix: an import could stop halfway with "session expired" when the old site had a must-use plugin that sets the site address (for example a leftover of another migration plugin). Must-use plugins and drop-ins are now put in place after the database switch, and ones that hard-code the old address are left out with a warning.
+* Fix: on sites with a translation plugin (TranslatePress, WPML, Polylang) the export could record the site address with a language path such as "/en", which damaged links on import. Exports now use the real address, and archives made with older versions are repaired during import.
+* The SQL file in the archive now declares its character set, so it also imports correctly with the mysql command-line tool.
+* Numbers in progress messages no longer show HTML code in languages that use a space as thousands separator.
 
 = 1.0.1 =
 * Passes the WordPress.org Plugin Check: error messages are escaped, all translatable strings have translator notes, and uploads are validated more strictly.

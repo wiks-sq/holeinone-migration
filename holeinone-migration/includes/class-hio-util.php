@@ -132,7 +132,58 @@ class HIO_Util {
 	 * @return string
 	 */
 	public static function size( $bytes ) {
-		return size_format( max( 0, (float) $bytes ), $bytes >= 1048576 ? 1 : 0 );
+		return self::text( size_format( max( 0, (float) $bytes ), $bytes >= 1048576 ? 1 : 0 ) );
+	}
+
+	/**
+	 * A number formatted for the site's language, as plain text. Some languages
+	 * use "&nbsp;" as thousands separator, which would show up literally in
+	 * progress messages (they are shown as text, not HTML).
+	 *
+	 * @param float $n Number.
+	 * @return string
+	 */
+	public static function num( $n ) {
+		return self::text( number_format_i18n( $n ) );
+	}
+
+	/**
+	 * HTML entities to plain text.
+	 *
+	 * @param string $s Text.
+	 * @return string
+	 */
+	public static function text( $s ) {
+		return html_entity_decode( (string) $s, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+	}
+
+	/**
+	 * The site address as configured (wp-config.php constant or database),
+	 * never through filters: translation plugins add a language path such as
+	 * "/en" to home_url() and CDN plugins rewrite addresses, which would break
+	 * search & replace on the new host.
+	 *
+	 * @param string $which home|siteurl.
+	 * @return string
+	 */
+	public static function raw_url( $which ) {
+		$const = 'home' === $which ? 'WP_HOME' : 'WP_SITEURL';
+		if ( defined( $const ) && constant( $const ) ) {
+			return untrailingslashit( (string) constant( $const ) );
+		}
+		global $wpdb;
+		return untrailingslashit( (string) HIO_DB::value( 'SELECT option_value FROM ' . self::ident( $wpdb->options ) . ' WHERE option_name = ' . HIO_DB::quote( $which ) . ' LIMIT 1' ) );
+	}
+
+	/**
+	 * Content and uploads addresses without filters (see raw_url()).
+	 *
+	 * @return string[] content_url, uploads_url.
+	 */
+	public static function raw_content_urls() {
+		$content = defined( 'WP_CONTENT_URL' ) ? untrailingslashit( WP_CONTENT_URL ) : untrailingslashit( content_url() );
+		$up      = function_exists( '_wp_upload_dir' ) ? _wp_upload_dir() : wp_upload_dir( null, false );
+		return array( $content, untrailingslashit( $up['baseurl'] ) );
 	}
 
 	/**

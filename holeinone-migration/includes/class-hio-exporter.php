@@ -252,7 +252,7 @@ class HIO_Exporter {
 		fclose( $fp );
 
 		/* translators: 1: number of files, 2: total size, e.g. 12 MB. */
-		$job->state['message']  = sprintf( __( 'Scanning files: %1$s files found (%2$s)', 'holeinone-migration' ), number_format_i18n( $sc['files'] ), HIO_Util::size( $sc['bytes'] ) );
+		$job->state['message']  = sprintf( __( 'Scanning files: %1$s files found (%2$s)', 'holeinone-migration' ), HIO_Util::num( $sc['files'] ), HIO_Util::size( $sc['bytes'] ) );
 		$job->state['progress'] = 2;
 
 		if ( empty( $sc['stack'] ) ) {
@@ -307,11 +307,17 @@ class HIO_Exporter {
 			'rows_done'  => 0,
 			'rows_total' => max( 1, $total ),
 		);
-		$job->log( sprintf( 'Database: %d tables, about %s rows.', count( $tables ), number_format_i18n( $total ) ) );
+		$job->log( sprintf( 'Database: %d tables, about %s rows.', count( $tables ), HIO_Util::num( $total ) ) );
 		$header = '-- Hole-in-One Migration database dump' . "\n"
-			. '-- Site: ' . home_url() . "\n"
+			. '-- Site: ' . HIO_Util::raw_url( 'home' ) . "\n"
 			. '-- Date: ' . gmdate( 'c' ) . "\n"
-			. '-- Table prefix is replaced by ' . self::PREFIX_TOKEN . "\n";
+			. '-- Table prefix is replaced by ' . self::PREFIX_TOKEN . "\n"
+			// Like mysqldump: makes the file import correctly with any MySQL
+			// client too (without SET NAMES, a client that assumes another
+			// character set would garble every non-ASCII character).
+			. "/*!40101 SET NAMES utf8mb4 */;\n"
+			. "/*!40014 SET FOREIGN_KEY_CHECKS=0 */;\n"
+			. "/*!40101 SET SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;\n";
 		file_put_contents( $job->path( 'database.sql' ), $header ); // phpcs:ignore
 		$job->state['db']['sql_size'] = strlen( $header );
 	}
@@ -467,7 +473,7 @@ class HIO_Exporter {
 		if ( $db['ti'] >= count( $db['tables'] ) ) {
 			file_put_contents( $job->path( 'database.sql' ), "-- End of dump\n", FILE_APPEND ); // phpcs:ignore
 			$db['sql_size'] = filesize( $job->path( 'database.sql' ) );
-			$job->log( sprintf( 'Database export complete: %s rows, %s.', number_format_i18n( $db['rows_done'] ), HIO_Util::size( $db['sql_size'] ) ) );
+			$job->log( sprintf( 'Database export complete: %s rows, %s.', HIO_Util::num( $db['rows_done'] ), HIO_Util::size( $db['sql_size'] ) ) );
 			$job->state['phase'] = 'archive';
 		}
 	}
@@ -502,14 +508,14 @@ class HIO_Exporter {
 			'format_version' => HIO_FORMAT_VERSION,
 			'created'        => gmdate( 'c' ),
 			'contents'       => $contents,
-			'home'           => home_url(),
-			'siteurl'        => site_url(),
+			'home'           => HIO_Util::raw_url( 'home' ),
+			'siteurl'        => HIO_Util::raw_url( 'siteurl' ),
 			'db_home'        => self::raw_option( 'home' ),
 			'db_siteurl'     => self::raw_option( 'siteurl' ),
-			'content_url'    => content_url(),
+			'content_url'    => HIO_Util::raw_content_urls()[0],
 			'abspath'        => untrailingslashit( wp_normalize_path( ABSPATH ) ),
 			'content_dir'    => untrailingslashit( wp_normalize_path( WP_CONTENT_DIR ) ),
-			'uploads_url'    => wp_upload_dir( null, false )['baseurl'],
+			'uploads_url'    => HIO_Util::raw_content_urls()[1],
 			'uploads_dir'    => untrailingslashit( wp_normalize_path( wp_upload_dir( null, false )['basedir'] ) ),
 			'prefix'         => $wpdb->prefix,
 			'wp_version'     => $wp_version,
@@ -525,7 +531,7 @@ class HIO_Exporter {
 		);
 		file_put_contents( $job->path( 'manifest.json' ), wp_json_encode( $manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) ); // phpcs:ignore
 
-		$host  = sanitize_title( preg_replace( '#^https?://#', '', home_url() ) );
+		$host  = sanitize_title( preg_replace( '#^https?://#', '', HIO_Util::raw_url( 'home' ) ) );
 		$token = bin2hex( random_bytes( 8 ) );
 		$ext   = 'zip' === $s['opts']['format'] ? 'zip' : 'tar.gz';
 		$label = array(
@@ -683,7 +689,7 @@ class HIO_Exporter {
 		$pct                    = min( 1, $a['bytes_done'] / $a['bytes_all'] );
 		$s['progress']          = 30 + (int) ( 69 * $pct );
 		/* translators: 1: size done, 2: total size, 3: number of files. */
-		$s['message']           = sprintf( __( 'Creating archive: %1$s of %2$s (%3$s files)', 'holeinone-migration' ), HIO_Util::size( $a['bytes_done'] ), HIO_Util::size( $a['bytes_all'] ), number_format_i18n( $a['entries'] ) );
+		$s['message']           = sprintf( __( 'Creating archive: %1$s of %2$s (%3$s files)', 'holeinone-migration' ), HIO_Util::size( $a['bytes_done'] ), HIO_Util::size( $a['bytes_all'] ), HIO_Util::num( $a['entries'] ) );
 
 		if ( $done ) {
 			self::finalize( $job );
@@ -706,7 +712,7 @@ class HIO_Exporter {
 		$meta = array(
 			'contents' => $s['opts']['contents'],
 			'format'   => $s['opts']['format'],
-			'site'     => home_url(),
+			'site'     => HIO_Util::raw_url( 'home' ),
 			'created'  => time(),
 			'files'    => $s['scan']['files'] ?? 0,
 			'warnings' => $s['warnings'],

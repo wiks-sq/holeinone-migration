@@ -515,7 +515,8 @@ class HIO_Plugin {
 		// swap, when the user's session and nonces no longer exist. The random job
 		// id (96 bits) is the secret instead, and only import jobs are shown to
 		// visitors who are not logged in. It returns progress only, never data.
-		$id  = isset( $_POST['job'] ) ? sanitize_key( wp_unslash( $_POST['job'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- intentional, see above.
+		$id  = isset( $_POST['job'] ) ? sanitize_key( wp_unslash( $_POST['job'] ) ) : '';
 		$job = HIO_Job::load( $id );
 		if ( ! $job || ( 'imp' !== $job->state['kind'] && ! current_user_can( 'manage_options' ) ) ) {
 			$this->fail( __( 'Job not found.', 'holeinone-migration' ), 'gone' );

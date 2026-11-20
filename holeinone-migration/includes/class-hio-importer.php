@@ -57,12 +57,12 @@ class HIO_Importer implements HIO_Tar_Handler {
 		$settings         = HIO_Util::settings();
 		$up               = wp_upload_dir( null, false );
 		$job->state['target'] = array(
-			'home'         => home_url(),
-			'siteurl'      => site_url(),
+			'home'         => HIO_Util::raw_url( 'home' ),
+			'siteurl'      => HIO_Util::raw_url( 'siteurl' ),
 			'db_home'      => (string) HIO_DB::value( 'SELECT option_value FROM ' . HIO_Util::ident( $wpdb->options ) . " WHERE option_name = 'home'" ),
 			'db_siteurl'   => (string) HIO_DB::value( 'SELECT option_value FROM ' . HIO_Util::ident( $wpdb->options ) . " WHERE option_name = 'siteurl'" ),
-			'content_url'  => content_url(),
-			'uploads_url'  => $up['baseurl'],
+			'content_url'  => HIO_Util::raw_content_urls()[0],
+			'uploads_url'  => HIO_Util::raw_content_urls()[1],
 			'abspath'      => untrailingslashit( wp_normalize_path( ABSPATH ) ),
 			'content_dir'  => untrailingslashit( wp_normalize_path( WP_CONTENT_DIR ) ),
 			'uploads_dir'  => untrailingslashit( wp_normalize_path( $up['basedir'] ) ),
@@ -287,6 +287,19 @@ class HIO_Importer implements HIO_Tar_Handler {
 			throw new HIO_Exception( esc_html__( 'Archives of WordPress Multisite networks are not supported.', 'holeinone-migration' ) );
 		}
 
+		// Archives of version 1.0.1 and older may carry an address that a plugin
+		// had changed during the export, for example "/en" added by a
+		// translation plugin. The database value is the real one then.
+		foreach ( array( 'home' => 'db_home', 'siteurl' => 'db_siteurl' ) as $k => $dbk ) {
+			if ( ! empty( $manifest[ $k ] ) && ! empty( $manifest[ $dbk ] ) ) {
+				$have = untrailingslashit( (string) $manifest[ $k ] );
+				$real = untrailingslashit( (string) $manifest[ $dbk ] );
+				if ( $have !== $real && 0 === strpos( $have, $real . '/' ) ) {
+					$job->log( sprintf( 'The archive lists the site address as %1$s; using the address stored in its database, %2$s.', $have, $real ) );
+					$manifest[ $k ] = $real;
+				}
+			}
+		}
 		$s['manifest'] = $manifest;
 		$job->log( sprintf( 'Archive OK: %s from %s (WordPress %s, PHP %s, contents: %s, created %s).', $s['format'], $manifest['home'], $manifest['wp_version'], $manifest['php_version'], $manifest['contents'], $manifest['created'] ) );
 		if ( version_compare( PHP_VERSION, $manifest['php_version'], '<' ) ) {
@@ -384,7 +397,71 @@ class HIO_Importer implements HIO_Tar_Handler {
 		if ( 'db' === $m['contents'] ) {
 			return null;
 		}
+		if ( self::autoloaded( $rel ) ) {
+			// WordPress runs these on every request, also on this import's own
+			// requests. A half-extracted one (or a loader whose folder is not
+			// extracted yet, or one that changes the site address and so logs
+			// the user out) would break the import. They are put in place only
+			// after the database switch, see install_staged().
+			$this->job->state['staged'][ $rel ] = 1;
+			return $this->job->path( 'staged/' . $rel );
+		}
 		return rtrim( WP_CONTENT_DIR, '/\\' ) . '/' . $rel;
+	}
+
+	/**
+	 * Is this wp-content file loaded by WordPress on every request?
+	 * Must-use plugins in the folder root, and drop-ins that load without
+	 * any setting in wp-config.php.
+	 *
+	 * @param string $rel Path relative to wp-content.
+	 * @return bool
+	 */
+	private static function autoloaded( $rel ) {
+		$rel = strtolower( $rel );
+		if ( preg_match( '#^mu-plugins/[^/]+\.php$#', $rel ) ) {
+			return true;
+		}
+		return in_array( $rel, array( 'object-cache.php', 'db.php', 'advanced-cache.php', 'fatal-error-handler.php', 'sunrise.php' ), true );
+	}
+
+	/**
+	 * Move the held-back must-use plugins and drop-ins into place. A file that
+	 * hard-codes the OLD site address (WP_HOME / WP_SITEURL) is left out: it
+	 * would send every visitor and login back to the old site. Safe to run
+	 * again after a crash: files already moved are skipped.
+	 */
+	private function install_staged() {
+		$job = $this->job;
+		$s   = &$job->state;
+		if ( empty( $s['staged'] ) ) {
+			return;
+		}
+		$old_host = (string) wp_parse_url( (string) $s['manifest']['home'], PHP_URL_HOST );
+		$moved    = untrailingslashit( (string) $s['manifest']['home'] ) !== untrailingslashit( (string) $s['target']['home'] );
+		foreach ( array_keys( $s['staged'] ) as $rel ) {
+			$src = $job->path( 'staged/' . $rel );
+			$dst = rtrim( WP_CONTENT_DIR, '/\\' ) . '/' . $rel;
+			if ( ! is_file( $src ) ) {
+				unset( $s['staged'][ $rel ] );
+				continue;
+			}
+			$code = (string) file_get_contents( $src ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+			if ( $moved && '' !== $old_host && preg_match( '/define\s*\(\s*[\'"]WP_(HOME|SITEURL)[\'"]/i', $code ) && false !== stripos( $code, $old_host ) ) {
+				$job->log( sprintf( 'Left out wp-content/%s: it hard-codes the old site address (WP_HOME / WP_SITEURL), which would send visitors and logins back to the old site. It is usually a leftover of another migration tool.', $rel ), 'warning' );
+				@unlink( $src ); // phpcs:ignore
+				unset( $s['staged'][ $rel ] );
+				continue;
+			}
+			if ( ! is_dir( dirname( $dst ) ) ) {
+				wp_mkdir_p( dirname( $dst ) );
+			}
+			if ( ! @rename( $src, $dst ) && ! ( @copy( $src, $dst ) && @unlink( $src ) ) ) { // phpcs:ignore
+				$job->log( 'Could not install wp-content/' . $rel . ' (check permissions).', 'warning' );
+			}
+			unset( $s['staged'][ $rel ] );
+		}
+		$job->save();
 	}
 
 	/**
@@ -550,7 +627,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 
 		$s['progress'] = 11 + (int) ( 49 * min( 1, $ex['coff'] / max( 1, $size ) ) );
 		/* translators: 1: number of files, 2: total size. */
-		$s['message']  = sprintf( __( 'Extracting: %1$s files, %2$s', 'holeinone-migration' ), number_format_i18n( $ex['files'] ), HIO_Util::size( $ex['bytes'] ) );
+		$s['message']  = sprintf( __( 'Extracting: %1$s files, %2$s', 'holeinone-migration' ), HIO_Util::num( $ex['files'] ), HIO_Util::size( $ex['bytes'] ) );
 
 		if ( $parser->ended() || $ex['coff'] >= $size ) {
 			if ( ! $parser->ended() ) {
@@ -681,7 +758,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 		$total         = max( 1, (float) ( $s['zip']['bytes'] ?? 1 ) );
 		$s['progress'] = 11 + (int) ( 49 * min( 1, $ex['bytes'] / $total ) );
 		/* translators: 1: number of files, 2: total size. */
-		$s['message']  = sprintf( __( 'Extracting: %1$s files, %2$s', 'holeinone-migration' ), number_format_i18n( $ex['files'] ), HIO_Util::size( $ex['bytes'] ) );
+		$s['message']  = sprintf( __( 'Extracting: %1$s files, %2$s', 'holeinone-migration' ), HIO_Util::num( $ex['files'] ), HIO_Util::size( $ex['bytes'] ) );
 		if ( $done ) {
 			$this->extract_done();
 		}
@@ -843,7 +920,9 @@ class HIO_Importer implements HIO_Tar_Handler {
 			}
 			$next = ftell( $fp );
 			$sql  = rtrim( $line, "\r\n" );
-			if ( '' === $sql || 0 === strpos( $sql, '--' ) ) {
+			if ( '' === $sql || 0 === strpos( $sql, '--' ) || 0 === strpos( $sql, '/*!' ) ) {
+				// Comments and the session settings in the header: this
+				// connection already uses them (see db_session()).
 				$d['off'] = $next;
 				continue;
 			}
@@ -1312,6 +1391,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 			}
 		}
 		$job->log( 'Database switched. Old tables removed.' );
+		$this->install_staged();
 		$this->complete();
 	}
 
@@ -1319,6 +1399,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 	 * Files-only import: nothing to swap.
 	 */
 	private function finish_files_only() {
+		$this->install_staged();
 		$this->complete();
 	}
 
