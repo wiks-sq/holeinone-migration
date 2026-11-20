@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/hero.png" alt="Hole-in-One Migration: move your whole WordPress site to a new host in one shot" width="100%">
+  <img src="docs/evenbetter_hero.png" alt="Hole-in-One Migration: move your whole WordPress site to a new host in one shot" width="100%">
 </p>
 
 <p align="center">
