@@ -1,5 +1,5 @@
 === Hole-in-One Migration ===
-Contributors: holeinone
+Contributors: wikssq
 Donate link: https://buymeacoffee.com/wikssq
 Tags: migration, migrate, move site, backup, clone
 Requires at least: 5.6
