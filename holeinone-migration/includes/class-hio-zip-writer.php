@@ -13,6 +13,8 @@
 
 defined( 'ABSPATH' ) || exit;
 
+// phpcs:disable WordPress.WP.AlternativeFunctions -- Streams multi-gigabyte archives and SQL dumps in small chunks across requests (fopen/fread/fwrite/fseek/ftruncate); WP_Filesystem has no streaming API and would load whole files into memory.
+
 /**
  * ZIP writer.
  */
@@ -62,7 +64,7 @@ class HIO_Zip_Writer {
 		$this->fp = @fopen( $path, 'c+b' ); // phpcs:ignore
 		$this->cd = @fopen( $cd_path, 'c+b' ); // phpcs:ignore
 		if ( ! $this->fp || ! $this->cd ) {
-			throw new HIO_Exception( __( 'Could not open the archive for writing.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Could not open the archive for writing.', 'holeinone-migration' ) );
 		}
 		ftruncate( $this->fp, (int) $this->st['size'] );
 		fseek( $this->fp, 0, SEEK_END );

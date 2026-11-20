@@ -7,6 +7,8 @@
 
 defined( 'ABSPATH' ) || exit;
 
+// phpcs:disable WordPress.WP.AlternativeFunctions -- Streams multi-gigabyte archives and SQL dumps in small chunks across requests (fopen/fread/fwrite/fseek/ftruncate); WP_Filesystem has no streaming API and would load whole files into memory.
+
 /**
  * Exception used for errors that should be shown to the user.
  */
@@ -16,6 +18,19 @@ class HIO_Exception extends Exception {}
  * Utility functions.
  */
 class HIO_Util {
+
+	/**
+	 * Exception messages are HTML-escaped where they are created (so they are
+	 * safe even if PHP ever prints an uncaught one). This turns one back into
+	 * plain text for JSON responses and the log, which are shown as text.
+	 *
+	 * @param Throwable|string $e Exception or message.
+	 * @return string
+	 */
+	public static function plain( $e ) {
+		$m = $e instanceof Throwable ? $e->getMessage() : (string) $e;
+		return html_entity_decode( $m, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+	}
 
 	const OPTION = 'hio_settings';
 
@@ -88,7 +103,9 @@ class HIO_Util {
 	public static function prepare_runtime( $budget ) {
 		ignore_user_abort( true );
 		if ( function_exists( 'set_time_limit' ) && false === strpos( (string) ini_get( 'disable_functions' ), 'set_time_limit' ) ) {
-			@set_time_limit( (int) max( 120, $budget * 4 ) ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+			// Each step stops itself after $budget seconds; this only stops hosts with a very
+			// low limit from killing the request before its checkpoint. Never unlimited.
+			@set_time_limit( (int) max( 120, $budget * 4 ) ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, Squiz.PHP.DiscouragedFunctions.Discouraged
 		}
 		if ( function_exists( 'wp_raise_memory_limit' ) ) {
 			wp_raise_memory_limit( 'admin' );
@@ -246,7 +263,7 @@ class HIO_Util {
 		while ( $off < $len ) {
 			$w = fwrite( $fp, 0 === $off ? $data : substr( $data, $off ) );
 			if ( false === $w || 0 === $w ) {
-				throw new HIO_Exception( __( 'Could not write to disk. Is the disk full or the folder not writable?', 'holeinone-migration' ) );
+				throw new HIO_Exception( esc_html__( 'Could not write to disk. Is the disk full or the folder not writable?', 'holeinone-migration' ) );
 			}
 			$off += $w;
 		}

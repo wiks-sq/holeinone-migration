@@ -207,7 +207,7 @@ class HIO_Tar_Parser {
 			$sum += ord( $tmp[ $i ] );
 		}
 		if ( $sum !== $stored ) {
-			throw new HIO_Exception( __( 'The archive is damaged (bad tar header checksum). Please create and upload the archive again.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'The archive is damaged (bad tar header checksum). Please create and upload the archive again.', 'holeinone-migration' ) );
 		}
 		$name  = rtrim( substr( $h, 0, 100 ), "\0" );
 		$size  = self::num( substr( $h, 124, 12 ) );

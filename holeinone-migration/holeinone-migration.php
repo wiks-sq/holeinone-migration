@@ -3,7 +3,7 @@
  * Plugin Name:       Hole-in-One Migration
  * Plugin URI:        https://wordpress.org/plugins/holeinone-migration/
  * Description:       Move a complete WordPress site (files + database) to a new web host in one shot. Every step runs in small, resumable chunks, so PHP timeouts and flaky connections cannot break your migration.
- * Version:           1.0.0
+ * Version:           1.0.1
  * Requires at least: 5.6
  * Requires PHP:      7.4
  * Author:            Hole-in-One Migration
@@ -16,7 +16,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'HIO_VERSION', '1.0.0' );
+define( 'HIO_VERSION', '1.0.1' );
 define( 'HIO_FORMAT_VERSION', 1 );
 define( 'HIO_FILE', __FILE__ );
 define( 'HIO_DIR', plugin_dir_path( __FILE__ ) );

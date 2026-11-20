@@ -24,7 +24,7 @@
 	function $all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
 	function fmt(s) {
 		var args = Array.prototype.slice.call(arguments, 1), i = 0;
-		return String(s).replace(/%[sd]/g, function () { return args[i++]; });
+		return String(s).replace(/%(?:(\d+)\$)?[sd]/g, function (m, n) { return n ? args[n - 1] : args[i++]; });
 	}
 	function esc(s) {
 		return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {

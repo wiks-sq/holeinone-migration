@@ -9,6 +9,8 @@
 
 defined( 'ABSPATH' ) || exit;
 
+// phpcs:disable WordPress.WP.AlternativeFunctions -- Streams multi-gigabyte archives and SQL dumps in small chunks across requests (fopen/fread/fwrite/fseek/ftruncate); WP_Filesystem has no streaming API and would load whole files into memory.
+
 /**
  * ZIP reader.
  */
@@ -25,7 +27,7 @@ class HIO_Zip_Reader {
 	public static function build_index( $path, $index ) {
 		$fp = @fopen( $path, 'rb' ); // phpcs:ignore
 		if ( ! $fp ) {
-			throw new HIO_Exception( __( 'Could not open the archive.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Could not open the archive.', 'holeinone-migration' ) );
 		}
 		fseek( $fp, 0, SEEK_END );
 		$size = ftell( $fp );
@@ -35,7 +37,7 @@ class HIO_Zip_Reader {
 		$pos = strrpos( $buf, "PK\x05\x06" );
 		if ( false === $pos ) {
 			fclose( $fp );
-			throw new HIO_Exception( __( 'The ZIP file is incomplete or damaged (no end record found). Was the upload complete?', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'The ZIP file is incomplete or damaged (no end record found). Was the upload complete?', 'holeinone-migration' ) );
 		}
 		$eocd      = unpack( 'Vsig/vdisk/vcddisk/vndisk/vcount/Vcdsize/Vcdoff', substr( $buf, $pos, 20 ) );
 		$count     = $eocd['count'];
@@ -62,7 +64,7 @@ class HIO_Zip_Reader {
 		$out = @fopen( $index, 'wb' ); // phpcs:ignore
 		if ( ! $out ) {
 			fclose( $fp );
-			throw new HIO_Exception( __( 'Could not write the archive index.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Could not write the archive index.', 'holeinone-migration' ) );
 		}
 		fseek( $fp, $cd_offset );
 		$bytes = 0;
@@ -72,7 +74,7 @@ class HIO_Zip_Reader {
 			if ( strlen( $h ) < 46 || "PK\x01\x02" !== substr( $h, 0, 4 ) ) {
 				fclose( $fp );
 				fclose( $out );
-				throw new HIO_Exception( __( 'The ZIP central directory is damaged.', 'holeinone-migration' ) );
+				throw new HIO_Exception( esc_html__( 'The ZIP central directory is damaged.', 'holeinone-migration' ) );
 			}
 			$r     = unpack( 'Vsig/vmade/vneed/vflags/vmethod/vtime/vdate/Vcrc/Vcsize/Vusize/vnlen/vxlen/vclen/vdisk/viattr/Veattr/Voff', $h );
 			$name  = $r['nlen'] > 0 ? fread( $fp, $r['nlen'] ) : '';
@@ -107,7 +109,7 @@ class HIO_Zip_Reader {
 			if ( $r['flags'] & 0x1 ) {
 				fclose( $fp );
 				fclose( $out );
-				throw new HIO_Exception( __( 'Encrypted ZIP files are not supported.', 'holeinone-migration' ) );
+				throw new HIO_Exception( esc_html__( 'Encrypted ZIP files are not supported.', 'holeinone-migration' ) );
 			}
 			$line = wp_json_encode(
 				array(
@@ -143,7 +145,7 @@ class HIO_Zip_Reader {
 		fseek( $fp, $offset );
 		$h = fread( $fp, 30 );
 		if ( strlen( $h ) < 30 || "PK\x03\x04" !== substr( $h, 0, 4 ) ) {
-			throw new HIO_Exception( __( 'The ZIP file is damaged (bad local header).', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'The ZIP file is damaged (bad local header).', 'holeinone-migration' ) );
 		}
 		$r = unpack( 'vnlen/vxlen', substr( $h, 26, 4 ) );
 		return $offset + 30 + $r['nlen'] + $r['xlen'];
@@ -165,7 +167,7 @@ class HIO_Zip_Reader {
 		if ( 8 === (int) $entry['m'] ) {
 			$raw = gzinflate( $raw );
 		} elseif ( 0 !== (int) $entry['m'] ) {
-			throw new HIO_Exception( __( 'Unsupported ZIP compression method.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Unsupported ZIP compression method.', 'holeinone-migration' ) );
 		}
 		return (string) $raw;
 	}

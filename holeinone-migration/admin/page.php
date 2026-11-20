@@ -250,7 +250,7 @@ $hio_coffee = HIO_Plugin::coffee_url();
 					'upload limit'       => size_format( wp_max_upload_size() ),
 					'zlib (.tar.gz)'     => function_exists( 'deflate_init' ) ? '✔' : '✘',
 					'free disk'          => null === $hio_free ? '?' : HIO_Util::size( $hio_free ),
-					'storage writable'   => is_writable( HIO_Storage::dir( 'work' ) ) ? '✔' : '✘',
+					'storage writable'   => wp_is_writable( HIO_Storage::dir( 'work' ) ) ? '✔' : '✘',
 				);
 				?>
 				<table class="hio-envtable">

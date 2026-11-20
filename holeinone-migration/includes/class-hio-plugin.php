@@ -7,6 +7,8 @@
 
 defined( 'ABSPATH' ) || exit;
 
+// phpcs:disable WordPress.WP.AlternativeFunctions -- Streams multi-gigabyte archives and SQL dumps in small chunks across requests (fopen/fread/fwrite/fseek/ftruncate); WP_Filesystem has no streaming API and would load whole files into memory.
+
 /**
  * Main plugin class.
  */
@@ -185,11 +187,14 @@ class HIO_Plugin {
 					'confirmImport' => __( 'This will REPLACE the content, settings, users, plugins and themes of THIS site with the uploaded backup. Continue?', 'holeinone-migration' ),
 					'confirmCancel' => __( 'Cancel this job and delete its temporary files?', 'holeinone-migration' ),
 					'confirmDelete' => __( 'Delete this backup file permanently?', 'holeinone-migration' ),
-					'retrying'      => __( 'Connection problem or timeout – retrying in %s seconds (attempt %d)…', 'holeinone-migration' ),
+					/* translators: 1: seconds until the next attempt, 2: attempt number. */
+					'retrying'      => __( 'Connection problem or timeout – retrying in %1$s seconds (attempt %2$d)…', 'holeinone-migration' ),
 					'busy'          => __( 'The server is still working on the previous request – waiting…', 'holeinone-migration' ),
 					'leave'         => __( 'A migration is running. If you leave, you can resume it later from this page.', 'holeinone-migration' ),
 					'chooseFile'    => __( 'Please choose a backup file first.', 'holeinone-migration' ),
+					/* translators: %s: file name. */
 					'reselect'      => __( 'To resume this upload, choose the same file again (%s) in the import box, then click "Resume upload".', 'holeinone-migration' ),
+					/* translators: %s: file name and size. */
 					'wrongFile'     => __( 'That is not the same file that was being uploaded. Please choose %s.', 'holeinone-migration' ),
 					'gaveUp'        => __( 'The server did not respond after many attempts. Your progress is saved: click "Retry" to continue, or check the troubleshooting tips in the Help tab.', 'holeinone-migration' ),
 					'expired'       => __( 'Your login session expired. Reload this page and click "Resume" – your progress is saved.', 'holeinone-migration' ),
@@ -338,7 +343,7 @@ class HIO_Plugin {
 			);
 			$this->ok( $this->payload( $job ) );
 		} catch ( Throwable $e ) {
-			$this->fail( $e->getMessage() );
+			$this->fail( HIO_Util::plain( $e ) );
 		}
 	}
 
@@ -350,7 +355,7 @@ class HIO_Plugin {
 		try {
 			foreach ( HIO_Job::unfinished() as $other ) {
 				if ( 'imp' === $other->state['kind'] ) {
-					throw new HIO_Exception( __( 'Another import is unfinished. Resume or cancel it first (see the top of this page).', 'holeinone-migration' ) );
+					throw new HIO_Exception( esc_html__( 'Another import is unfinished. Resume or cancel it first (see the top of this page).', 'holeinone-migration' ) );
 				}
 			}
 			if ( 'server' === self::post( 'source' ) ) {
@@ -360,7 +365,7 @@ class HIO_Plugin {
 			}
 			$this->ok( $this->payload( $job ) );
 		} catch ( Throwable $e ) {
-			$this->fail( $e->getMessage() );
+			$this->fail( HIO_Util::plain( $e ) );
 		}
 	}
 
@@ -378,13 +383,17 @@ class HIO_Plugin {
 		}
 		HIO_Util::prepare_runtime( 60 );
 		try {
-			// phpcs:ignore WordPress.Security.NonceVerification.Missing
-			$file = isset( $_FILES['chunk'] ) ? $_FILES['chunk'] : null;
-			if ( ! $file || ! empty( $file['error'] ) || ! is_uploaded_file( $file['tmp_name'] ) ) {
-				$err = $file ? (int) $file['error'] : -1;
-				throw new HIO_Exception( sprintf( __( 'The chunk was not received (upload error %d).', 'holeinone-migration' ), $err ) );
+			// The nonce was verified above. Only the temporary path and the error
+			// code are used; the file is never moved to a name the client chose.
+			// phpcs:disable WordPress.Security.NonceVerification.Missing
+			$tmp = isset( $_FILES['chunk']['tmp_name'] ) && is_string( $_FILES['chunk']['tmp_name'] ) ? sanitize_text_field( $_FILES['chunk']['tmp_name'] ) : '';
+			$err = isset( $_FILES['chunk']['error'] ) ? absint( $_FILES['chunk']['error'] ) : -1;
+			// phpcs:enable WordPress.Security.NonceVerification.Missing
+			if ( '' === $tmp || 0 !== $err || ! is_uploaded_file( $tmp ) ) {
+				/* translators: %d: PHP upload error code. */
+				throw new HIO_Exception( esc_html( sprintf( __( 'The chunk was not received (upload error %d).', 'holeinone-migration' ), $err ) ) );
 			}
-			$have = HIO_Importer::upload_chunk( $job, (int) self::post( 'offset' ), $file['tmp_name'] );
+			$have = HIO_Importer::upload_chunk( $job, (int) self::post( 'offset' ), $tmp );
 			$job->unlock();
 			$this->ok(
 				array(
@@ -396,7 +405,7 @@ class HIO_Plugin {
 			);
 		} catch ( Throwable $e ) {
 			$job->unlock();
-			$this->fail( $e->getMessage(), 'chunk' );
+			$this->fail( HIO_Util::plain( $e ), 'chunk' );
 		}
 	}
 
@@ -450,8 +459,8 @@ class HIO_Plugin {
 			}
 			$job->new_log         = $log;
 			$job->state['status'] = 'error';
-			$job->state['error']  = $e->getMessage();
-			$job->log( $e->getMessage(), 'error' );
+			$job->state['error']  = HIO_Util::plain( $e );
+			$job->log( HIO_Util::plain( $e ), 'error' );
 			try {
 				$job->save();
 			} catch ( Throwable $e2 ) {
@@ -502,8 +511,11 @@ class HIO_Plugin {
 	public function ajax_status() {
 		$this->ob_level = ob_get_level();
 		ob_start();
-		// phpcs:ignore WordPress.Security.NonceVerification.Missing
-		$id  = isset( $_POST['job'] ) ? sanitize_key( wp_unslash( $_POST['job'] ) ) : '';
+		// No nonce on purpose: this endpoint is called right after the database
+		// swap, when the user's session and nonces no longer exist. The random job
+		// id (96 bits) is the secret instead, and only import jobs are shown to
+		// visitors who are not logged in. It returns progress only, never data.
+		$id  = isset( $_POST['job'] ) ? sanitize_key( wp_unslash( $_POST['job'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
 		$job = HIO_Job::load( $id );
 		if ( ! $job || ( 'imp' !== $job->state['kind'] && ! current_user_can( 'manage_options' ) ) ) {
 			$this->fail( __( 'Job not found.', 'holeinone-migration' ), 'gone' );
@@ -683,6 +695,7 @@ class HIO_Plugin {
 		$guard = ( defined( 'WPMU_PLUGIN_DIR' ) ? WPMU_PLUGIN_DIR : WP_CONTENT_DIR . '/mu-plugins' ) . '/' . HIO_Importer::GUARD_FILE;
 		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
 		if ( is_file( $guard ) && $screen && 'toplevel_page_' . self::SLUG !== $screen->id ) {
+			/* translators: %s: link to the import page. */
 			echo '<div class="notice notice-warning"><p>' . wp_kses_post( sprintf( __( 'An import with <strong>Hole-in-One Migration</strong> is unfinished. <a href="%s">Resume or cancel it</a>.', 'holeinone-migration' ), esc_url( admin_url( 'admin.php?page=' . self::SLUG . '&tab=import' ) ) ) ) . '</p></div>';
 		}
 	}

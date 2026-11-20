@@ -108,25 +108,26 @@ class HIO_DB {
 					$wpdb->check_connection( false );
 					continue;
 				}
-				throw new HIO_Exception( sprintf( 'MySQL error %d: %s', $errno, $error ) );
+				throw new HIO_Exception( esc_html( sprintf( 'MySQL error %d: %s', $errno, $error ) ) );
 			}
 
 			// Fallback through $wpdb (non-mysqli drivers).
 			$wpdb->suppress_errors( true );
 			if ( $want_rows && preg_match( '/^\s*(SELECT|SHOW|DESCRIBE|EXPLAIN)/i', $sql ) ) {
-				$r = $wpdb->get_results( $sql, ARRAY_N ); // phpcs:ignore WordPress.DB
+				// $sql is built by this plugin with every value escaped (see quote()) or comes from its own dump file.
+				$r = $wpdb->get_results( $sql, ARRAY_N ); // phpcs:ignore WordPress.DB, PluginCheck.Security.DirectDB.UnescapedDBParameter
 				if ( $wpdb->last_error ) {
-					throw new HIO_Exception( 'Database error: ' . $wpdb->last_error );
+					throw new HIO_Exception( esc_html( 'Database error: ' . $wpdb->last_error ) );
 				}
 				return is_array( $r ) ? $r : array();
 			}
-			$r = $wpdb->query( $sql ); // phpcs:ignore WordPress.DB
+			$r = $wpdb->query( $sql ); // phpcs:ignore WordPress.DB, PluginCheck.Security.DirectDB.UnescapedDBParameter
 			if ( false === $r ) {
-				throw new HIO_Exception( 'Database error: ' . $wpdb->last_error );
+				throw new HIO_Exception( esc_html( 'Database error: ' . $wpdb->last_error ) );
 			}
 			return true;
 		}
-		throw new HIO_Exception( 'Database connection lost.' );
+		throw new HIO_Exception( esc_html( 'Database connection lost.' ) );
 	}
 
 	/**
@@ -151,10 +152,10 @@ class HIO_DB {
 		try {
 			$res = @$link->query( $sql, MYSQLI_USE_RESULT ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
 		} catch ( Throwable $e ) {
-			throw new HIO_Exception( 'MySQL error: ' . $e->getMessage() );
+			throw new HIO_Exception( esc_html( 'MySQL error: ' . $e->getMessage() ) );
 		}
 		if ( false === $res ) {
-			throw new HIO_Exception( sprintf( 'MySQL error %d: %s', $link->errno, $link->error ) );
+			throw new HIO_Exception( esc_html( sprintf( 'MySQL error %d: %s', $link->errno, $link->error ) ) );
 		}
 		$n = 0;
 		try {

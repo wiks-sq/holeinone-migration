@@ -15,6 +15,8 @@
 
 defined( 'ABSPATH' ) || exit;
 
+// phpcs:disable WordPress.WP.AlternativeFunctions -- Streams multi-gigabyte archives and SQL dumps in small chunks across requests (fopen/fread/fwrite/fseek/ftruncate); WP_Filesystem has no streaming API and would load whole files into memory.
+
 /**
  * Tar.gz writer.
  */
@@ -71,11 +73,11 @@ class HIO_Tar_Writer {
 			$state
 		);
 		if ( ! function_exists( 'deflate_init' ) ) {
-			throw new HIO_Exception( __( 'The PHP zlib extension is missing. Choose the ZIP format in Settings or ask your host to enable zlib.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'The PHP zlib extension is missing. Choose the ZIP format in Settings or ask your host to enable zlib.', 'holeinone-migration' ) );
 		}
 		$this->fp = @fopen( $path, 'c+b' ); // phpcs:ignore
 		if ( ! $this->fp ) {
-			throw new HIO_Exception( __( 'Could not open the archive for writing.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Could not open the archive for writing.', 'holeinone-migration' ) );
 		}
 		ftruncate( $this->fp, (int) $this->st['size'] );
 		fseek( $this->fp, 0, SEEK_END );

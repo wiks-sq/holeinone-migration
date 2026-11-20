@@ -81,7 +81,7 @@ class HIO_Storage {
 				@file_put_contents( $path, $content ); // phpcs:ignore
 			}
 		}
-		return $ok && is_writable( self::dir( 'work' ) );
+		return $ok && wp_is_writable( self::dir( 'work' ) );
 	}
 
 	/**

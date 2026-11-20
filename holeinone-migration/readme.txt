@@ -5,11 +5,11 @@ Tags: migration, migrate, move site, backup, clone
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.0
+Stable tag: 1.0.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Move your whole WordPress site to a new host in one shot. Chunked and resumable, so PHP timeouts cannot break your migration. 100% free, no size limits.
+Move your whole WordPress site to a new host in one file. Chunked and resumable, so PHP timeouts can't break it. Free, no size limits.
 
 == Description ==
 
@@ -94,6 +94,10 @@ In `wp-content/hio-migration/backups/` under long random file names that cannot 
 Edit `HIO_BUYMEACOFFEE_URL` at the top of `holeinone-migration.php`, define it in `wp-config.php`, or use the `hio_buymeacoffee_url` filter. An empty string hides the box.
 
 == Changelog ==
+
+= 1.0.1 =
+* Passes the WordPress.org Plugin Check: error messages are escaped, all translatable strings have translator notes, and uploads are validated more strictly.
+* Translations can now reorder the placeholders in the retry message.
 
 = 1.0.0 =
 * First release.

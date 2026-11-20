@@ -8,6 +8,8 @@
 
 defined( 'ABSPATH' ) || exit;
 
+// phpcs:disable WordPress.WP.AlternativeFunctions -- Streams multi-gigabyte archives and SQL dumps in small chunks across requests (fopen/fread/fwrite/fseek/ftruncate); WP_Filesystem has no streaming API and would load whole files into memory.
+
 /**
  * Exporter.
  */
@@ -151,7 +153,7 @@ class HIO_Exporter {
 					self::archive( $job );
 					break;
 				default:
-					throw new HIO_Exception( 'Unknown phase.' );
+					throw new HIO_Exception( esc_html( 'Unknown phase.' ) );
 			}
 		}
 	}
@@ -190,7 +192,7 @@ class HIO_Exporter {
 		$list = $job->path( 'filelist.txt' );
 		$fp   = fopen( $list, 'c+b' ); // phpcs:ignore
 		if ( ! $fp ) {
-			throw new HIO_Exception( __( 'Could not write the file list.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Could not write the file list.', 'holeinone-migration' ) );
 		}
 		ftruncate( $fp, $sc['list_size'] );
 		fseek( $fp, 0, SEEK_END );
@@ -249,6 +251,7 @@ class HIO_Exporter {
 		$sc['list_size'] = ftell( $fp );
 		fclose( $fp );
 
+		/* translators: 1: number of files, 2: total size, e.g. 12 MB. */
 		$job->state['message']  = sprintf( __( 'Scanning files: %1$s files found (%2$s)', 'holeinone-migration' ), number_format_i18n( $sc['files'] ), HIO_Util::size( $sc['bytes'] ) );
 		$job->state['progress'] = 2;
 
@@ -347,7 +350,7 @@ class HIO_Exporter {
 		$db = &$job->state['db'];
 		$fp = fopen( $job->path( 'database.sql' ), 'c+b' ); // phpcs:ignore
 		if ( ! $fp ) {
-			throw new HIO_Exception( __( 'Could not write the database dump.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Could not write the database dump.', 'holeinone-migration' ) );
 		}
 		ftruncate( $fp, $db['sql_size'] );
 		fseek( $fp, 0, SEEK_END );
@@ -363,7 +366,7 @@ class HIO_Exporter {
 				$row    = HIO_DB::rows( 'SHOW CREATE TABLE ' . $qname );
 				$create = isset( $row[0][1] ) ? $row[0][1] : '';
 				if ( '' === $create ) {
-					throw new HIO_Exception( 'Could not read structure of table ' . $name );
+					throw new HIO_Exception( esc_html( 'Could not read structure of table ' . $name ) );
 				}
 				// Replace the prefix in all backticked identifiers (table + FK references).
 				$create = preg_replace_callback(
@@ -451,6 +454,7 @@ class HIO_Exporter {
 				$db['ti']++;
 				$db['created'] = false;
 			}
+			/* translators: 1: table name, 2: table number, 3: number of tables. */
 			$job->state['message'] = sprintf( __( 'Exporting database: table %1$s (%2$d of %3$d)', 'holeinone-migration' ), $name, min( $db['ti'] + 1, count( $db['tables'] ) ), count( $db['tables'] ) );
 		}
 
@@ -678,6 +682,7 @@ class HIO_Exporter {
 
 		$pct                    = min( 1, $a['bytes_done'] / $a['bytes_all'] );
 		$s['progress']          = 30 + (int) ( 69 * $pct );
+		/* translators: 1: size done, 2: total size, 3: number of files. */
 		$s['message']           = sprintf( __( 'Creating archive: %1$s of %2$s (%3$s files)', 'holeinone-migration' ), HIO_Util::size( $a['bytes_done'] ), HIO_Util::size( $a['bytes_all'] ), number_format_i18n( $a['entries'] ) );
 
 		if ( $done ) {
@@ -695,7 +700,7 @@ class HIO_Exporter {
 		$s    = &$job->state;
 		$dest = HIO_Storage::dir( 'backups' ) . '/' . $s['arc']['file'];
 		if ( ! @rename( $job->path( 'archive.part' ), $dest ) ) { // phpcs:ignore
-			throw new HIO_Exception( __( 'Could not move the finished archive into the backups folder.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Could not move the finished archive into the backups folder.', 'holeinone-migration' ) );
 		}
 		$size = filesize( $dest );
 		$meta = array(
