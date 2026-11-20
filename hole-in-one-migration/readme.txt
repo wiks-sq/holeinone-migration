@@ -5,7 +5,7 @@ Tags: migration, migrate, move site, backup, clone
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.2
+Stable tag: 1.0.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -29,7 +29,7 @@ Hole-in-One Migration moves a complete WordPress site (database, media, plugins 
 
 == Installation ==
 
-1. Upload the `holeinone-migration` folder to `/wp-content/plugins/` or install the zip via Plugins → Add New → Upload Plugin.
+1. Upload the `hole-in-one-migration` folder to `/wp-content/plugins/` or install the zip via Plugins → Add New → Upload Plugin.
 2. Activate the plugin.
 3. Open **Migration** in the admin menu.
 
@@ -91,9 +91,12 @@ In `wp-content/hio-migration/backups/` under long random file names that cannot 
 
 = How do I set my own Buy Me a Coffee link? =
 
-Edit `HIO_BUYMEACOFFEE_URL` at the top of `holeinone-migration.php`, define it in `wp-config.php`, or use the `hio_buymeacoffee_url` filter. An empty string hides the box.
+Edit `HIO_BUYMEACOFFEE_URL` at the top of `hole-in-one-migration.php`, define it in `wp-config.php`, or use the `hio_buymeacoffee_url` filter. An empty string hides the box.
 
 == Changelog ==
+
+= 1.0.3 =
+* The plugin slug and text domain are now hole-in-one-migration, matching the WordPress.org slug. If you installed an earlier version from GitHub, it shows up as a second plugin: download any backups you want to keep, delete the old version, then install this one (deleting an old version also deletes the backups).
 
 = 1.0.2 =
 * Fix: an import could stop halfway with "session expired" when the old site had a must-use plugin that sets the site address (for example a leftover of another migration plugin). Must-use plugins and drop-ins are now put in place after the database switch, and ones that hard-code the old address are left out with a warning.

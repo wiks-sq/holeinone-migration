@@ -80,13 +80,13 @@ class HIO_Job {
 	public static function create( $kind ) {
 		if ( ! HIO_Storage::ensure() ) {
 			/* translators: %s: folder path. */
-			throw new HIO_Exception( esc_html( sprintf( __( 'The folder %s is not writable. Please fix the folder permissions (755) and try again.', 'holeinone-migration' ), HIO_Storage::base() ) ) );
+			throw new HIO_Exception( esc_html( sprintf( __( 'The folder %s is not writable. Please fix the folder permissions (755) and try again.', 'hole-in-one-migration' ), HIO_Storage::base() ) ) );
 		}
 		$job     = new self();
 		$job->id = $kind . '_' . bin2hex( random_bytes( 12 ) );
 		$job->dir = HIO_Storage::dir( 'work' ) . '/' . $job->id;
 		if ( ! wp_mkdir_p( $job->dir ) ) {
-			throw new HIO_Exception( esc_html__( 'Could not create the job folder.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Could not create the job folder.', 'hole-in-one-migration' ) );
 		}
 		@file_put_contents( $job->dir . '/index.php', "<?php // Silence is golden.\n" ); // phpcs:ignore
 		$settings   = HIO_Util::settings();
@@ -181,7 +181,7 @@ class HIO_Job {
 		$file = $this->path( 'state.json' );
 		$tmp  = $file . '.tmp';
 		if ( false === @file_put_contents( $tmp, $json ) ) { // phpcs:ignore
-			throw new HIO_Exception( esc_html__( 'Could not save progress. Is the disk full?', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Could not save progress. Is the disk full?', 'hole-in-one-migration' ) );
 		}
 		if ( is_file( $file ) ) {
 			@copy( $file, $file . '.bak' ); // phpcs:ignore
@@ -190,7 +190,7 @@ class HIO_Job {
 			// Windows cannot rename over an existing file.
 			@unlink( $file ); // phpcs:ignore
 			if ( ! @rename( $tmp, $file ) ) { // phpcs:ignore
-				throw new HIO_Exception( esc_html__( 'Could not save progress.', 'holeinone-migration' ) );
+				throw new HIO_Exception( esc_html__( 'Could not save progress.', 'hole-in-one-migration' ) );
 			}
 		}
 	}

@@ -23,8 +23,8 @@ How Hole-in-One Migration stays reliable on hosts with strict limits, and how it
 ## Layout
 
 ```
-holeinone-migration/
-  holeinone-migration.php          bootstrap, constants, Buy Me a Coffee URL
+hole-in-one-migration/
+  hole-in-one-migration.php       bootstrap, constants, Buy Me a Coffee URL
   includes/class-hio-plugin.php    admin page, AJAX endpoints, downloads (HTTP Range), notices
   includes/class-hio-job.php       job state, checkpoints, lock, time budget, log
   includes/class-hio-exporter.php  scan -> database dump -> archive

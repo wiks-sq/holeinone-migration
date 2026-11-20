@@ -73,11 +73,11 @@ class HIO_Tar_Writer {
 			$state
 		);
 		if ( ! function_exists( 'deflate_init' ) ) {
-			throw new HIO_Exception( esc_html__( 'The PHP zlib extension is missing. Choose the ZIP format in Settings or ask your host to enable zlib.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'The PHP zlib extension is missing. Choose the ZIP format in Settings or ask your host to enable zlib.', 'hole-in-one-migration' ) );
 		}
 		$this->fp = @fopen( $path, 'c+b' ); // phpcs:ignore
 		if ( ! $this->fp ) {
-			throw new HIO_Exception( esc_html__( 'Could not open the archive for writing.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Could not open the archive for writing.', 'hole-in-one-migration' ) );
 		}
 		ftruncate( $this->fp, (int) $this->st['size'] );
 		fseek( $this->fp, 0, SEEK_END );

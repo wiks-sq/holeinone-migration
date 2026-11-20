@@ -64,7 +64,7 @@ class HIO_Zip_Writer {
 		$this->fp = @fopen( $path, 'c+b' ); // phpcs:ignore
 		$this->cd = @fopen( $cd_path, 'c+b' ); // phpcs:ignore
 		if ( ! $this->fp || ! $this->cd ) {
-			throw new HIO_Exception( esc_html__( 'Could not open the archive for writing.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Could not open the archive for writing.', 'hole-in-one-migration' ) );
 		}
 		ftruncate( $this->fp, (int) $this->st['size'] );
 		fseek( $this->fp, 0, SEEK_END );

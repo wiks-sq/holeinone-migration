@@ -314,7 +314,7 @@ class HIO_Util {
 		while ( $off < $len ) {
 			$w = fwrite( $fp, 0 === $off ? $data : substr( $data, $off ) );
 			if ( false === $w || 0 === $w ) {
-				throw new HIO_Exception( esc_html__( 'Could not write to disk. Is the disk full or the folder not writable?', 'holeinone-migration' ) );
+				throw new HIO_Exception( esc_html__( 'Could not write to disk. Is the disk full or the folder not writable?', 'hole-in-one-migration' ) );
 			}
 			$off += $w;
 		}

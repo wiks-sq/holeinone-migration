@@ -110,7 +110,7 @@ class HIO_Exporter {
 			'dirs'      => 0,
 			'bytes'     => 0,
 		);
-		$s['message']  = __( 'Starting…', 'holeinone-migration' );
+		$s['message']  = __( 'Starting…', 'hole-in-one-migration' );
 
 		$job->log( sprintf( 'Export started: contents=%s, format=%s, WordPress %s, PHP %s, max_execution_time=%s, memory_limit=%s', $contents, $format, get_bloginfo( 'version' ), PHP_VERSION, ini_get( 'max_execution_time' ), ini_get( 'memory_limit' ) ) );
 		if ( 'files' !== $contents ) {
@@ -192,7 +192,7 @@ class HIO_Exporter {
 		$list = $job->path( 'filelist.txt' );
 		$fp   = fopen( $list, 'c+b' ); // phpcs:ignore
 		if ( ! $fp ) {
-			throw new HIO_Exception( esc_html__( 'Could not write the file list.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Could not write the file list.', 'hole-in-one-migration' ) );
 		}
 		ftruncate( $fp, $sc['list_size'] );
 		fseek( $fp, 0, SEEK_END );
@@ -252,7 +252,7 @@ class HIO_Exporter {
 		fclose( $fp );
 
 		/* translators: 1: number of files, 2: total size, e.g. 12 MB. */
-		$job->state['message']  = sprintf( __( 'Scanning files: %1$s files found (%2$s)', 'holeinone-migration' ), HIO_Util::num( $sc['files'] ), HIO_Util::size( $sc['bytes'] ) );
+		$job->state['message']  = sprintf( __( 'Scanning files: %1$s files found (%2$s)', 'hole-in-one-migration' ), HIO_Util::num( $sc['files'] ), HIO_Util::size( $sc['bytes'] ) );
 		$job->state['progress'] = 2;
 
 		if ( empty( $sc['stack'] ) ) {
@@ -356,7 +356,7 @@ class HIO_Exporter {
 		$db = &$job->state['db'];
 		$fp = fopen( $job->path( 'database.sql' ), 'c+b' ); // phpcs:ignore
 		if ( ! $fp ) {
-			throw new HIO_Exception( esc_html__( 'Could not write the database dump.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Could not write the database dump.', 'hole-in-one-migration' ) );
 		}
 		ftruncate( $fp, $db['sql_size'] );
 		fseek( $fp, 0, SEEK_END );
@@ -461,7 +461,7 @@ class HIO_Exporter {
 				$db['created'] = false;
 			}
 			/* translators: 1: table name, 2: table number, 3: number of tables. */
-			$job->state['message'] = sprintf( __( 'Exporting database: table %1$s (%2$d of %3$d)', 'holeinone-migration' ), $name, min( $db['ti'] + 1, count( $db['tables'] ) ), count( $db['tables'] ) );
+			$job->state['message'] = sprintf( __( 'Exporting database: table %1$s (%2$d of %3$d)', 'hole-in-one-migration' ), $name, min( $db['ti'] + 1, count( $db['tables'] ) ), count( $db['tables'] ) );
 		}
 
 		fflush( $fp );
@@ -503,7 +503,7 @@ class HIO_Exporter {
 		$s        = &$job->state;
 		$contents = $s['opts']['contents'];
 		$manifest = array(
-			'generator'      => 'holeinone-migration',
+			'generator'      => 'holeinone-migration', // Archive format id: keep, older versions check it.
 			'plugin_version' => HIO_VERSION,
 			'format_version' => HIO_FORMAT_VERSION,
 			'created'        => gmdate( 'c' ),
@@ -689,7 +689,7 @@ class HIO_Exporter {
 		$pct                    = min( 1, $a['bytes_done'] / $a['bytes_all'] );
 		$s['progress']          = 30 + (int) ( 69 * $pct );
 		/* translators: 1: size done, 2: total size, 3: number of files. */
-		$s['message']           = sprintf( __( 'Creating archive: %1$s of %2$s (%3$s files)', 'holeinone-migration' ), HIO_Util::size( $a['bytes_done'] ), HIO_Util::size( $a['bytes_all'] ), HIO_Util::num( $a['entries'] ) );
+		$s['message']           = sprintf( __( 'Creating archive: %1$s of %2$s (%3$s files)', 'hole-in-one-migration' ), HIO_Util::size( $a['bytes_done'] ), HIO_Util::size( $a['bytes_all'] ), HIO_Util::num( $a['entries'] ) );
 
 		if ( $done ) {
 			self::finalize( $job );
@@ -706,7 +706,7 @@ class HIO_Exporter {
 		$s    = &$job->state;
 		$dest = HIO_Storage::dir( 'backups' ) . '/' . $s['arc']['file'];
 		if ( ! @rename( $job->path( 'archive.part' ), $dest ) ) { // phpcs:ignore
-			throw new HIO_Exception( esc_html__( 'Could not move the finished archive into the backups folder.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Could not move the finished archive into the backups folder.', 'hole-in-one-migration' ) );
 		}
 		$size = filesize( $dest );
 		$meta = array(
@@ -725,7 +725,7 @@ class HIO_Exporter {
 		$s['phase']    = 'done';
 		$s['status']   = 'done';
 		$s['progress'] = 100;
-		$s['message']  = __( 'Export complete!', 'holeinone-migration' );
+		$s['message']  = __( 'Export complete!', 'hole-in-one-migration' );
 		$s['result']   = array(
 			'file' => $s['arc']['file'],
 			'size' => $size,

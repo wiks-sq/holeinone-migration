@@ -51,7 +51,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 	private static function new_job() {
 		global $wpdb;
 		if ( is_multisite() ) {
-			throw new HIO_Exception( esc_html__( 'WordPress Multisite is not supported.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'WordPress Multisite is not supported.', 'hole-in-one-migration' ) );
 		}
 		$job              = HIO_Job::create( 'imp' );
 		$settings         = HIO_Util::settings();
@@ -83,15 +83,15 @@ class HIO_Importer implements HIO_Tar_Handler {
 	 */
 	public static function start_upload( $name, $size ) {
 		if ( ! preg_match( '/\.(tar\.gz|tgz|zip)$/i', $name ) ) {
-			throw new HIO_Exception( esc_html__( 'Please choose a .tar.gz or .zip archive created by Hole-in-One Migration.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Please choose a .tar.gz or .zip archive created by Hole-in-One Migration.', 'hole-in-one-migration' ) );
 		}
 		if ( $size <= 0 ) {
-			throw new HIO_Exception( esc_html__( 'The file is empty.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'The file is empty.', 'hole-in-one-migration' ) );
 		}
 		$free = HIO_Util::free_space( HIO_Storage::base() );
 		if ( null !== $free && $free < $size * 1.1 ) {
 			/* translators: 1: size the archive needs, 2: free disk space. */
-			throw new HIO_Exception( esc_html( sprintf( __( 'Not enough disk space: the archive needs %1$s, but only %2$s is free on this server.', 'holeinone-migration' ), HIO_Util::size( $size ), HIO_Util::size( $free ) ) ) );
+			throw new HIO_Exception( esc_html( sprintf( __( 'Not enough disk space: the archive needs %1$s, but only %2$s is free on this server.', 'hole-in-one-migration' ), HIO_Util::size( $size ), HIO_Util::size( $free ) ) ) );
 		}
 		$job                     = self::new_job();
 		$ext                     = preg_match( '/\.zip$/i', $name ) ? 'zip' : 'tar.gz';
@@ -103,7 +103,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 			'size'     => (int) $size,
 			'received' => 0,
 		);
-		$job->state['message']   = __( 'Uploading…', 'holeinone-migration' );
+		$job->state['message']   = __( 'Uploading…', 'hole-in-one-migration' );
 		$job->log( sprintf( 'Import started (browser upload): %s, %s', sanitize_file_name( $name ), HIO_Util::size( $size ) ) );
 		$job->save();
 		return $job;
@@ -120,7 +120,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 		$name = basename( (string) $name );
 		$path = HIO_Storage::dir( 'import' ) . '/' . $name;
 		if ( ! preg_match( '/\.(tar\.gz|tgz|zip)$/i', $name ) || ! is_file( $path ) ) {
-			throw new HIO_Exception( esc_html__( 'That file was not found in the import folder.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'That file was not found in the import folder.', 'hole-in-one-migration' ) );
 		}
 		$job                       = self::new_job();
 		$job->state['phase']       = 'validate';
@@ -142,7 +142,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 	 */
 	public static function upload_chunk( HIO_Job $job, $offset, $tmp ) {
 		if ( 'upload' !== $job->state['phase'] ) {
-			throw new HIO_Exception( esc_html__( 'This import is not waiting for an upload.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'This import is not waiting for an upload.', 'hole-in-one-migration' ) );
 		}
 		$part = $job->state['archive'] . '.part';
 		clearstatcache( true, $part );
@@ -153,7 +153,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 		$fp = @fopen( $part, 'c+b' ); // phpcs:ignore
 		$in = @fopen( $tmp, 'rb' ); // phpcs:ignore
 		if ( ! $fp || ! $in ) {
-			throw new HIO_Exception( esc_html__( 'Could not store the uploaded chunk.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Could not store the uploaded chunk.', 'hole-in-one-migration' ) );
 		}
 		ftruncate( $fp, $offset );
 		fseek( $fp, $offset );
@@ -173,7 +173,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 		$up['received'] = $have;
 		$job->state['progress'] = (int) ( 10 * $have / max( 1, $up['size'] ) );
 		/* translators: 1: size uploaded, 2: total size. */
-		$job->state['message']  = sprintf( __( 'Uploading: %1$s of %2$s', 'holeinone-migration' ), HIO_Util::size( $have ), HIO_Util::size( $up['size'] ) );
+		$job->state['message']  = sprintf( __( 'Uploading: %1$s of %2$s', 'hole-in-one-migration' ), HIO_Util::size( $have ), HIO_Util::size( $up['size'] ) );
 		if ( $have >= $up['size'] ) {
 			if ( $have > $up['size'] ) {
 				$fp = fopen( $part, 'c+b' ); // phpcs:ignore
@@ -181,10 +181,10 @@ class HIO_Importer implements HIO_Tar_Handler {
 				fclose( $fp );
 			}
 			if ( ! @rename( $part, $job->state['archive'] ) ) { // phpcs:ignore
-				throw new HIO_Exception( esc_html__( 'Could not finish the upload.', 'holeinone-migration' ) );
+				throw new HIO_Exception( esc_html__( 'Could not finish the upload.', 'hole-in-one-migration' ) );
 			}
 			$job->state['phase']   = 'validate';
-			$job->state['message'] = __( 'Upload complete. Checking the archive…', 'holeinone-migration' );
+			$job->state['message'] = __( 'Upload complete. Checking the archive…', 'hole-in-one-migration' );
 			$job->log( 'Upload complete.' );
 		}
 		$job->save();
@@ -251,7 +251,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 		$path = $s['archive'];
 		$fp   = @fopen( $path, 'rb' ); // phpcs:ignore
 		if ( ! $fp ) {
-			throw new HIO_Exception( esc_html__( 'Could not open the archive.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Could not open the archive.', 'hole-in-one-migration' ) );
 		}
 		$magic = fread( $fp, 4 );
 		fclose( $fp );
@@ -274,17 +274,18 @@ class HIO_Importer implements HIO_Tar_Handler {
 			}
 			fclose( $ih );
 		} else {
-			throw new HIO_Exception( esc_html__( 'This is not a .tar.gz or .zip file.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'This is not a .tar.gz or .zip file.', 'hole-in-one-migration' ) );
 		}
 
-		if ( ! is_array( $manifest ) || ( $manifest['generator'] ?? '' ) !== 'holeinone-migration' ) {
-			throw new HIO_Exception( esc_html__( 'This archive was not created by Hole-in-One Migration (no manifest found). Please export the old site with this plugin first.', 'holeinone-migration' ) );
+		// Archive format id. It stayed 'holeinone-migration' when the plugin slug changed in 1.0.3.
+		if ( ! is_array( $manifest ) || ! in_array( $manifest['generator'] ?? '', array( 'holeinone-migration', 'hole-in-one-migration' ), true ) ) {
+			throw new HIO_Exception( esc_html__( 'This archive was not created by Hole-in-One Migration (no manifest found). Please export the old site with this plugin first.', 'hole-in-one-migration' ) );
 		}
 		if ( (int) $manifest['format_version'] > HIO_FORMAT_VERSION ) {
-			throw new HIO_Exception( esc_html__( 'This archive was made with a newer version of Hole-in-One Migration. Please update the plugin on this site first.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'This archive was made with a newer version of Hole-in-One Migration. Please update the plugin on this site first.', 'hole-in-one-migration' ) );
 		}
 		if ( ! empty( $manifest['multisite'] ) ) {
-			throw new HIO_Exception( esc_html__( 'Archives of WordPress Multisite networks are not supported.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Archives of WordPress Multisite networks are not supported.', 'hole-in-one-migration' ) );
 		}
 
 		// Archives of version 1.0.1 and older may carry an address that a plugin
@@ -321,7 +322,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 			'cur'    => null,
 		);
 		$s['phase'] = 'extract';
-		$s['message'] = __( 'Extracting files…', 'holeinone-migration' );
+		$s['message'] = __( 'Extracting files…', 'hole-in-one-migration' );
 		if ( 'db' !== $manifest['contents'] ) {
 			self::install_guard( $s['target']['plugin'], $job );
 		}
@@ -387,6 +388,8 @@ class HIO_Importer implements HIO_Tar_Handler {
 			HIO_Storage::rel(),
 			'plugins/' . dirname( $t['plugin'] ),
 			'plugins/' . ( $m['plugin_dir'] ?? 'holeinone-migration' ),
+			'plugins/holeinone-migration', // Copies of this plugin under its pre-1.0.3 name.
+			'plugins/hole-in-one-migration',
 			'mu-plugins/' . self::GUARD_FILE,
 		);
 		foreach ( $skip as $sk ) {
@@ -603,11 +606,11 @@ class HIO_Importer implements HIO_Tar_Handler {
 				while ( ! $end ) {
 					$chunk = fread( $fp, $read );
 					if ( false === $chunk || '' === $chunk ) {
-						throw new HIO_Exception( esc_html__( 'The archive is incomplete (unexpected end of file). Please upload it again.', 'holeinone-migration' ) );
+						throw new HIO_Exception( esc_html__( 'The archive is incomplete (unexpected end of file). Please upload it again.', 'hole-in-one-migration' ) );
 					}
 					$out = @inflate_add( $ctx, $chunk, ZLIB_SYNC_FLUSH ); // phpcs:ignore
 					if ( false === $out ) {
-						throw new HIO_Exception( esc_html__( 'The archive is damaged (decompression failed). Please upload it again.', 'holeinone-migration' ) );
+						throw new HIO_Exception( esc_html__( 'The archive is damaged (decompression failed). Please upload it again.', 'hole-in-one-migration' ) );
 					}
 					if ( '' !== $out ) {
 						$parser->feed( $out );
@@ -627,11 +630,11 @@ class HIO_Importer implements HIO_Tar_Handler {
 
 		$s['progress'] = 11 + (int) ( 49 * min( 1, $ex['coff'] / max( 1, $size ) ) );
 		/* translators: 1: number of files, 2: total size. */
-		$s['message']  = sprintf( __( 'Extracting: %1$s files, %2$s', 'holeinone-migration' ), HIO_Util::num( $ex['files'] ), HIO_Util::size( $ex['bytes'] ) );
+		$s['message']  = sprintf( __( 'Extracting: %1$s files, %2$s', 'hole-in-one-migration' ), HIO_Util::num( $ex['files'] ), HIO_Util::size( $ex['bytes'] ) );
 
 		if ( $parser->ended() || $ex['coff'] >= $size ) {
 			if ( ! $parser->ended() ) {
-				throw new HIO_Exception( esc_html__( 'The archive is incomplete (end marker missing). Please create and upload it again.', 'holeinone-migration' ) );
+				throw new HIO_Exception( esc_html__( 'The archive is incomplete (end marker missing). Please create and upload it again.', 'hole-in-one-migration' ) );
 			}
 			$this->extract_done();
 		}
@@ -661,7 +664,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 					while ( $cur['done'] < $cur['u'] && ! $job->should_stop() ) {
 						$buf = fread( $fp, (int) min( $chunk, $cur['u'] - $cur['done'] ) );
 						if ( false === $buf || '' === $buf ) {
-							throw new HIO_Exception( esc_html__( 'The archive is incomplete (unexpected end of file).', 'holeinone-migration' ) );
+							throw new HIO_Exception( esc_html__( 'The archive is incomplete (unexpected end of file).', 'hole-in-one-migration' ) );
 						}
 						$this->entry_data( $buf );
 						$cur['crc']  = HIO_Util::crc32_combine( $cur['crc'], crc32( $buf ), strlen( $buf ) );
@@ -670,7 +673,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 					if ( $cur['done'] >= $cur['u'] ) {
 						if ( ( $cur['crc'] & 0xFFFFFFFF ) !== ( $cur['crc_want'] & 0xFFFFFFFF ) ) {
 							/* translators: %s: file name inside the archive. */
-							throw new HIO_Exception( esc_html( sprintf( __( 'Checksum error in %s. The archive is damaged; please upload it again.', 'holeinone-migration' ), $cur['name'] ) ) );
+							throw new HIO_Exception( esc_html( sprintf( __( 'Checksum error in %s. The archive is damaged; please upload it again.', 'hole-in-one-migration' ), $cur['name'] ) ) );
 						}
 						$this->entry_end();
 						$ex['cur'] = null;
@@ -730,14 +733,14 @@ class HIO_Importer implements HIO_Tar_Handler {
 				while ( $left > 0 ) {
 					$buf = fread( $fp, (int) min( 1048576, $left ) );
 					if ( false === $buf || '' === $buf ) {
-						throw new HIO_Exception( esc_html__( 'The archive is incomplete (unexpected end of file).', 'holeinone-migration' ) );
+						throw new HIO_Exception( esc_html__( 'The archive is incomplete (unexpected end of file).', 'hole-in-one-migration' ) );
 					}
 					$left -= strlen( $buf );
 					if ( $ctx ) {
 						$buf = inflate_add( $ctx, $buf, $left > 0 ? ZLIB_SYNC_FLUSH : ZLIB_FINISH );
 						if ( false === $buf ) {
 							/* translators: %s: file name inside the archive. */
-							throw new HIO_Exception( esc_html( sprintf( __( 'Decompression failed for %s. The archive is damaged.', 'holeinone-migration' ), $name ) ) );
+							throw new HIO_Exception( esc_html( sprintf( __( 'Decompression failed for %s. The archive is damaged.', 'hole-in-one-migration' ), $name ) ) );
 						}
 					}
 					hash_update( $hc, $buf );
@@ -745,7 +748,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 				}
 				if ( hexdec( hash_final( $hc ) ) !== $e['crc'] ) {
 					/* translators: %s: file name inside the archive. */
-					throw new HIO_Exception( esc_html( sprintf( __( 'Checksum error in %s. The archive is damaged; please upload it again.', 'holeinone-migration' ), $name ) ) );
+					throw new HIO_Exception( esc_html( sprintf( __( 'Checksum error in %s. The archive is damaged; please upload it again.', 'hole-in-one-migration' ), $name ) ) );
 				}
 				$this->entry_end();
 			}
@@ -758,7 +761,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 		$total         = max( 1, (float) ( $s['zip']['bytes'] ?? 1 ) );
 		$s['progress'] = 11 + (int) ( 49 * min( 1, $ex['bytes'] / $total ) );
 		/* translators: 1: number of files, 2: total size. */
-		$s['message']  = sprintf( __( 'Extracting: %1$s files, %2$s', 'holeinone-migration' ), HIO_Util::num( $ex['files'] ), HIO_Util::size( $ex['bytes'] ) );
+		$s['message']  = sprintf( __( 'Extracting: %1$s files, %2$s', 'hole-in-one-migration' ), HIO_Util::num( $ex['files'] ), HIO_Util::size( $ex['bytes'] ) );
 		if ( $done ) {
 			$this->extract_done();
 		}
@@ -775,10 +778,10 @@ class HIO_Importer implements HIO_Tar_Handler {
 			return;
 		}
 		if ( ! is_file( $this->job->path( 'database.sql' ) ) ) {
-			throw new HIO_Exception( esc_html__( 'The archive does not contain a database.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'The archive does not contain a database.', 'hole-in-one-migration' ) );
 		}
 		$s['phase']   = 'db_import';
-		$s['message'] = __( 'Importing database…', 'holeinone-migration' );
+		$s['message'] = __( 'Importing database…', 'hole-in-one-migration' );
 		$s['progress'] = 60;
 	}
 
@@ -927,7 +930,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 				continue;
 			}
 			if ( ';' !== substr( $sql, -1 ) ) {
-				throw new HIO_Exception( esc_html__( 'The database dump in the archive is incomplete. Please export the old site again.', 'holeinone-migration' ) );
+				throw new HIO_Exception( esc_html__( 'The database dump in the archive is incomplete. Please export the old site again.', 'hole-in-one-migration' ) );
 			}
 			if ( 0 === strpos( $sql, 'INSERT INTO ' . $tok ) ) {
 				// REPLACE makes re-running a statement after a crash harmless.
@@ -949,11 +952,11 @@ class HIO_Importer implements HIO_Tar_Handler {
 			} catch ( HIO_Exception $e ) {
 				$msg = HIO_Util::plain( $e );
 				if ( false !== stripos( $msg, 'max_allowed_packet' ) || false !== stripos( $msg, 'gone away' ) ) {
-					$msg .= ' ' . __( '(The database server rejected a large statement. Ask your host to raise max_allowed_packet to 16M or more.)', 'holeinone-migration' );
+					$msg .= ' ' . __( '(The database server rejected a large statement. Ask your host to raise max_allowed_packet to 16M or more.)', 'hole-in-one-migration' );
 				}
 				fclose( $fp );
 				/* translators: 1: database error message, 2: start of the failed SQL statement. */
-				throw new HIO_Exception( esc_html( sprintf( __( 'Database import failed: %1$s — statement: %2$s', 'holeinone-migration' ), $msg, substr( $sql, 0, 300 ) ) ) );
+				throw new HIO_Exception( esc_html( sprintf( __( 'Database import failed: %1$s — statement: %2$s', 'hole-in-one-migration' ), $msg, substr( $sql, 0, 300 ) ) ) );
 			}
 			$d['off'] = $next;
 			$d['stmts']++;
@@ -966,7 +969,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 
 		$s['progress'] = 60 + (int) ( 25 * min( 1, $d['off'] / max( 1, $d['size'] ) ) );
 		/* translators: 1: size done, 2: total size. */
-		$s['message']  = sprintf( __( 'Importing database: %1$s of %2$s', 'holeinone-migration' ), HIO_Util::size( $d['off'] ), HIO_Util::size( $d['size'] ) );
+		$s['message']  = sprintf( __( 'Importing database: %1$s of %2$s', 'hole-in-one-migration' ), HIO_Util::size( $d['off'] ), HIO_Util::size( $d['size'] ) );
 		if ( $finished ) {
 			$job->log( sprintf( 'Database import complete: %d statements.', $d['stmts'] ) );
 			$s['phase'] = 'replace';
@@ -1185,7 +1188,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 				}
 				$pct          = max( 0, min( 99, $pct ) );
 				/* translators: 1: table number, 2: number of tables, 3: table name, 4: percent done. */
-				$s['message'] = sprintf( __( 'Updating addresses: table %1$d of %2$d (%3$s, about %4$d%%)', 'holeinone-migration' ), $r['ti'] + 1, count( $r['tables'] ), $cur['name'], $pct );
+				$s['message'] = sprintf( __( 'Updating addresses: table %1$d of %2$d (%3$s, about %4$d%%)', 'hole-in-one-migration' ), $r['ti'] + 1, count( $r['tables'] ), $cur['name'], $pct );
 			}
 		}
 
@@ -1194,7 +1197,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 			$job->log( sprintf( 'Search & replace complete: %d rows updated.', $r['rows'] ) );
 			$this->fixups();
 			$s['phase']   = 'swap';
-			$s['message'] = __( 'Switching to the new database…', 'holeinone-migration' );
+			$s['message'] = __( 'Switching to the new database…', 'hole-in-one-migration' );
 		}
 	}
 
@@ -1221,7 +1224,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 		$um   = HIO_Util::ident( $tmp . 'usermeta' );
 
 		if ( ! in_array( $tmp . 'options', HIO_DB::tables_with_prefix( $tmp ), true ) ) {
-			throw new HIO_Exception( esc_html__( 'The imported database has no options table. The archive does not look like a WordPress database.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'The imported database has no options table. The archive does not look like a WordPress database.', 'hole-in-one-migration' ) );
 		}
 
 		// Table prefix changed: rename prefix-dependent keys.
@@ -1246,7 +1249,8 @@ class HIO_Importer implements HIO_Tar_Handler {
 			array_filter(
 				$plugins,
 				function ( $p ) use ( $mine ) {
-					return is_string( $p ) && ( $p === $mine || false === strpos( $p, 'holeinone-migration.php' ) );
+					// Drop other copies of this plugin, including the pre-1.0.3 name.
+					return is_string( $p ) && ( $p === $mine || ! preg_match( '#(^|/)hole-?in-?one-migration\.php$#', $p ) );
 				}
 			)
 		);
@@ -1310,7 +1314,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 
 		$check = HIO_DB::value( 'SELECT COUNT(*) FROM ' . HIO_Util::ident( $tmp . 'options' ) . " WHERE option_name = 'siteurl'" );
 		if ( 1 > (int) $check ) {
-			throw new HIO_Exception( esc_html__( 'Safety check failed: the imported options table has no site address. Nothing was changed.', 'holeinone-migration' ) );
+			throw new HIO_Exception( esc_html__( 'Safety check failed: the imported options table has no site address. Nothing was changed.', 'hole-in-one-migration' ) );
 		}
 
 		$pairs = array();
@@ -1421,10 +1425,10 @@ class HIO_Importer implements HIO_Tar_Handler {
 		$s['phase']     = 'done';
 		$s['status']    = 'done';
 		$s['progress']  = 100;
-		$s['message']   = __( 'Import complete!', 'holeinone-migration' );
+		$s['message']   = __( 'Import complete!', 'hole-in-one-migration' );
 		$s['result']    = array(
 			'relogin' => $db,
-			'login'   => wp_login_url( admin_url( 'admin.php?page=holeinone-migration' ) ),
+			'login'   => wp_login_url( admin_url( 'admin.php?page=hole-in-one-migration' ) ),
 			'home'    => home_url( '/' ),
 		);
 		$job->log( 'Import complete.' . ( $db ? ' Log in with the username and password of the OLD site.' : '' ) );

@@ -469,7 +469,7 @@
 					pendingUpload = job;
 					var msg = fmt(T.reselect, job.upload ? job.upload.name : '');
 					if (!$('#hio-file')) {
-						window.location.href = window.location.pathname + '?page=holeinone-migration&tab=import';
+						window.location.href = window.location.pathname + '?page=hole-in-one-migration&tab=import';
 						return;
 					}
 					if (upBtn) { upBtn.textContent = 'Resume upload'; upBtn.disabled = false; }

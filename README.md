@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/wiks-sq/holeinone-migration/releases/latest/download/holeinone-migration.zip"><img src="https://img.shields.io/badge/Download-plugin%20zip-2e9a5b?style=for-the-badge&logo=wordpress&logoColor=white" alt="Download the plugin"></a>
+  <a href="https://github.com/wiks-sq/holeinone-migration/releases/latest/download/hole-in-one-migration.zip"><img src="https://img.shields.io/badge/Download-plugin%20zip-2e9a5b?style=for-the-badge&logo=wordpress&logoColor=white" alt="Download the plugin"></a>
 </p>
 
 <p align="center">
@@ -59,9 +59,9 @@ The plugin's **Help & Instructions** tab has the full guide and troubleshooting.
 
 ## Installation
 
-Download [`holeinone-migration.zip`](https://github.com/wiks-sq/holeinone-migration/releases/latest/download/holeinone-migration.zip), then in WordPress go to **Plugins → Add New → Upload Plugin**, choose the zip and activate it. You'll find it under **Migration** in the admin menu.
+Download [`hole-in-one-migration.zip`](https://github.com/wiks-sq/holeinone-migration/releases/latest/download/hole-in-one-migration.zip), then in WordPress go to **Plugins → Add New → Upload Plugin**, choose the zip and activate it. You'll find it under **Migration** in the admin menu.
 
-Or copy the [`holeinone-migration/`](holeinone-migration) folder into `wp-content/plugins/`.
+Or copy the [`hole-in-one-migration/`](hole-in-one-migration) folder into `wp-content/plugins/`.
 
 ## Tested the hard way
 
