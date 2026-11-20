@@ -1,0 +1,3 @@
+*.zip
+.e2e-tmp/
+.DS_Store
