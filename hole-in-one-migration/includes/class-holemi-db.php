@@ -11,7 +11,7 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Database helper.
  */
-class HIO_DB {
+class HOLEMI_DB {
 
 	/**
 	 * The mysqli link or null when WordPress uses another driver.
@@ -30,7 +30,7 @@ class HIO_DB {
 	 * @param string $sql   SQL.
 	 * @param bool   $assoc Associative rows instead of numeric.
 	 * @return array
-	 * @throws HIO_Exception On error.
+	 * @throws HOLEMI_Exception On error.
 	 */
 	public static function rows( $sql, $assoc = false ) {
 		$res = self::raw( $sql );
@@ -50,7 +50,7 @@ class HIO_DB {
 	 *
 	 * @param string $sql SQL.
 	 * @return int Affected rows.
-	 * @throws HIO_Exception On error.
+	 * @throws HOLEMI_Exception On error.
 	 */
 	public static function exec( $sql ) {
 		$res = self::raw( $sql, false );
@@ -82,7 +82,7 @@ class HIO_DB {
 	 * @param string $sql        SQL.
 	 * @param bool   $want_rows  Whether rows are expected (wpdb fallback only).
 	 * @return mixed
-	 * @throws HIO_Exception On error.
+	 * @throws HOLEMI_Exception On error.
 	 */
 	private static function raw( $sql, $want_rows = true ) {
 		global $wpdb;
@@ -108,7 +108,7 @@ class HIO_DB {
 					$wpdb->check_connection( false );
 					continue;
 				}
-				throw new HIO_Exception( esc_html( sprintf( 'MySQL error %d: %s', $errno, $error ) ) );
+				throw new HOLEMI_Exception( esc_html( sprintf( 'MySQL error %d: %s', $errno, $error ) ) );
 			}
 
 			// Fallback through $wpdb (non-mysqli drivers).
@@ -117,17 +117,17 @@ class HIO_DB {
 				// $sql is built by this plugin with every value escaped (see quote()) or comes from its own dump file.
 				$r = $wpdb->get_results( $sql, ARRAY_N ); // phpcs:ignore WordPress.DB, PluginCheck.Security.DirectDB.UnescapedDBParameter
 				if ( $wpdb->last_error ) {
-					throw new HIO_Exception( esc_html( 'Database error: ' . $wpdb->last_error ) );
+					throw new HOLEMI_Exception( esc_html( 'Database error: ' . $wpdb->last_error ) );
 				}
 				return is_array( $r ) ? $r : array();
 			}
 			$r = $wpdb->query( $sql ); // phpcs:ignore WordPress.DB, PluginCheck.Security.DirectDB.UnescapedDBParameter
 			if ( false === $r ) {
-				throw new HIO_Exception( esc_html( 'Database error: ' . $wpdb->last_error ) );
+				throw new HOLEMI_Exception( esc_html( 'Database error: ' . $wpdb->last_error ) );
 			}
 			return true;
 		}
-		throw new HIO_Exception( esc_html( 'Database connection lost.' ) );
+		throw new HOLEMI_Exception( esc_html( 'Database connection lost.' ) );
 	}
 
 	/**
@@ -138,7 +138,7 @@ class HIO_DB {
 	 * @param string   $sql SQL.
 	 * @param callable $cb  Called with each numeric row.
 	 * @return int Number of rows.
-	 * @throws HIO_Exception On error.
+	 * @throws HOLEMI_Exception On error.
 	 */
 	public static function each( $sql, callable $cb ) {
 		$link = self::link();
@@ -152,10 +152,10 @@ class HIO_DB {
 		try {
 			$res = @$link->query( $sql, MYSQLI_USE_RESULT ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
 		} catch ( Throwable $e ) {
-			throw new HIO_Exception( esc_html( 'MySQL error: ' . $e->getMessage() ) );
+			throw new HOLEMI_Exception( esc_html( 'MySQL error: ' . $e->getMessage() ) );
 		}
 		if ( false === $res ) {
-			throw new HIO_Exception( esc_html( sprintf( 'MySQL error %d: %s', $link->errno, $link->error ) ) );
+			throw new HOLEMI_Exception( esc_html( sprintf( 'MySQL error %d: %s', $link->errno, $link->error ) ) );
 		}
 		$n = 0;
 		try {
@@ -184,9 +184,9 @@ class HIO_DB {
 		foreach ( $pk as $i => $col ) {
 			$and = array();
 			for ( $j = 0; $j < $i; $j++ ) {
-				$and[] = HIO_Util::ident( $pk[ $j ] ) . ' = ' . self::quote( $last[ $j ] );
+				$and[] = HOLEMI_Util::ident( $pk[ $j ] ) . ' = ' . self::quote( $last[ $j ] );
 			}
-			$and[] = HIO_Util::ident( $col ) . ' > ' . self::quote( $last[ $i ] );
+			$and[] = HOLEMI_Util::ident( $col ) . ' > ' . self::quote( $last[ $i ] );
 			$or[]  = '(' . implode( ' AND ', $and ) . ')';
 		}
 		return '(' . implode( ' OR ', $or ) . ')';
@@ -202,7 +202,7 @@ class HIO_DB {
 		if ( null === $v ) {
 			return 'NULL';
 		}
-		return "'" . HIO_Util::sql_escape( $v ) . "'";
+		return "'" . HOLEMI_Util::sql_escape( $v ) . "'";
 	}
 
 	/**
@@ -232,7 +232,7 @@ class HIO_DB {
 	 */
 	public static function columns( $table ) {
 		$out = array();
-		foreach ( self::rows( 'SHOW COLUMNS FROM ' . HIO_Util::ident( $table ), true ) as $c ) {
+		foreach ( self::rows( 'SHOW COLUMNS FROM ' . HOLEMI_Util::ident( $table ), true ) as $c ) {
 			$extra = isset( $c['Extra'] ) ? strtoupper( $c['Extra'] ) : '';
 			$out[] = array(
 				'name'      => $c['Field'],
@@ -251,7 +251,7 @@ class HIO_DB {
 	 */
 	public static function primary_key( $table ) {
 		$keys = array();
-		foreach ( self::rows( 'SHOW KEYS FROM ' . HIO_Util::ident( $table ) . " WHERE Key_name = 'PRIMARY'", true ) as $k ) {
+		foreach ( self::rows( 'SHOW KEYS FROM ' . HOLEMI_Util::ident( $table ) . " WHERE Key_name = 'PRIMARY'", true ) as $k ) {
 			$keys[ (int) $k['Seq_in_index'] ] = $k['Column_name'];
 		}
 		ksort( $keys );

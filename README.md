@@ -51,7 +51,7 @@ Most migration plugins try to do everything in one long request, and hosts kill 
 1. **Old site:** install the plugin, go to **Migration → Export**, click **Start export**, then **Download**.
 2. **New host:** install a fresh, empty WordPress and this plugin. Nothing else.
 3. **New site:** go to **Migration → Import**, choose the file and click **Upload and import**.
-   For very large files, upload the archive by FTP into `wp-content/hio-migration/import/` and click **Import this file**.
+   For very large files, upload the archive by FTP into the import folder shown on the Import page and click **Import this file**.
 4. **Log in with the username and password of the OLD site.** The users came over with the database.
 5. Point your domain's DNS to the new host, set up SSL, and delete the backup files on both sites.
 
@@ -76,20 +76,21 @@ These tests ran in Docker, not on real hosting providers. Reports from real host
 ## FAQ
 
 **What's included?**
-The `wp-content` folder (uploads, plugins, themes, languages) and all database tables with your WordPress table prefix. WordPress core and `wp-config.php` aren't included: the new host has its own, with its own database login.
+The `wp-content` folder (uploads, plugins, themes, languages), plugin/theme/uploads folders the site keeps outside `wp-content`, and all database tables with your WordPress table prefix. WordPress core and `wp-config.php` aren't included: the new host has its own, with its own database login.
 
 **Where are backups stored? Are they safe?**
-In `wp-content/hio-migration/backups/` under long random names that can't be guessed. Working files sit in a folder that denies web access. On **nginx** servers that protection doesn't apply, so delete backups right after downloading them. Uninstalling the plugin deletes all its backups.
+In `wp-content/hole-in-one-migration-<random>/`, a folder with an unguessable name that denies all web access (`.htaccess`/`web.config`; on nginx the random name keeps it hidden). Archives are downloaded through WordPress by administrators only. Delete backups after downloading them. Uninstalling the plugin deletes all its backups.
 
 **Is Multisite supported?**
 No, single sites only.
 
 **Can I open the archive myself?**
-Yes. Inside are `wp-content/`, `hio-database.sql` and `hio-manifest.json`.
+Yes. Inside are `wp-content/`, `hio-database.sql` and `hio-manifest.json` (plus `outside-wp-content/` if some folders live outside wp-content).
 
 ## For developers
 
 How the chunking, resume logic, archive writers and atomic database swap work, plus the full test notes: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 
 ## Support
 

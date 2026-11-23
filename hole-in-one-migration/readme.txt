@@ -5,7 +5,7 @@ Tags: migration, migrate, move site, backup, clone
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.3
+Stable tag: 1.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -20,7 +20,7 @@ Hole-in-One Migration moves a complete WordPress site (database, media, plugins 
 * **One file, standard formats:** website + database in a single `.tar.gz` (default) or `.zip`. Both open with any archive tool.
 * **Separate options:** export the website files only, or the database only.
 * **No upload limits:** archives are uploaded in small pieces (works even with a 2 MB upload limit), and an interrupted upload resumes where it stopped. Huge sites can also be uploaded by FTP.
-* **The new site stays online:** the database is imported into temporary tables and switched live in one atomic step at the very end. If anything fails before that, the site is unchanged.
+* **The new site stays online:** files are extracted into a staging folder and the database into temporary tables. At the very end the files are moved into place folder by folder and the database is switched live in one atomic step. Cancel before that, and the site is left as it was.
 * **Safe search & replace:** old addresses and server paths are replaced everywhere, including serialized data (widgets, page builders, theme options), JSON and URL-encoded data. A different table prefix on the new host is handled automatically.
 * **Gentle on the server:** low memory use, a configurable pause between requests, and nothing running in the background.
 * **Compatibility fixes:** MySQL 8 to MariaDB collations, unsupported storage engines, foreign keys, zero dates, generated columns and binary data.
@@ -49,7 +49,7 @@ Hole-in-One Migration moves a complete WordPress site (database, media, plugins 
 **3. Import**
 
 1. On the NEW site, go to Migration → Import, choose the file and click **Upload and import**.
-   For very large files, upload the archive by FTP into `wp-content/hio-migration/import/` instead, reload the page and click **Import this file**.
+   For very large files, upload the archive by FTP into the import folder shown on the Import page (`wp-content/hole-in-one-migration-…/import/`, with a random name), reload the page and click **Import this file**.
 2. Wait for "Import complete". You are logged out automatically.
 3. **Log in with the username and password of the OLD site.**
 
@@ -63,7 +63,7 @@ Hole-in-One Migration moves a complete WordPress site (database, media, plugins 
 
 = What is included in the archive? =
 
-The `wp-content` folder (uploads, plugins, themes, must-use plugins, languages) and all database tables with the WordPress table prefix. WordPress core files and `wp-config.php` are not included: the new host has its own, with its own database credentials.
+The `wp-content` folder (uploads, plugins, themes, must-use plugins, languages) and all database tables with the WordPress table prefix. Plugin, must-use plugin, theme and uploads folders that the site keeps outside `wp-content` are included too, and are restored where the new site keeps them. WordPress core files and `wp-config.php` are not included: the new host has its own, with its own database credentials.
 
 = What is excluded by default? =
 
@@ -73,9 +73,9 @@ Cache folders and cache drop-ins, debug logs, archives of other backup plugins, 
 
 The server is slow or overloaded. Let it run: the plugin automatically halves the work per request after every failure. You can also lower "Work time per request" in Settings.
 
-= The download link returns 403 or 404 =
+= The download stops or is slow =
 
-Use "Alternative download": it streams the file through WordPress and supports resuming. You can also fetch the file from `wp-content/hio-migration/backups/` by FTP.
+Start it again: downloads go through WordPress for logged-in administrators only and support resuming, so the browser or a download manager continues where it stopped. You can also fetch the file from the storage folder's `backups/` folder by FTP.
 
 = Is Multisite supported? =
 
@@ -83,17 +83,25 @@ No, single sites only.
 
 = Can I open the archive myself? =
 
-Yes. `.tar.gz` opens with 7-Zip, WinRAR, macOS Archive Utility or `tar -xzf`, and `.zip` opens everywhere. Inside are `wp-content/`, `hio-database.sql` (table prefix written as `__HIOP__`) and `hio-manifest.json`.
+Yes. `.tar.gz` opens with 7-Zip, WinRAR, macOS Archive Utility or `tar -xzf`, and `.zip` opens everywhere. Inside are `wp-content/`, `hio-database.sql` (table prefix written as `__HIOP__`) and `hio-manifest.json`, plus `outside-wp-content/` if the site keeps some folders outside wp-content.
 
 = Where are backups stored? Are they safe? =
 
-In `wp-content/hio-migration/backups/` under long random file names that cannot be guessed, with directory listing disabled. Working files live in a folder that denies all web access (Apache/LiteSpeed via `.htaccess`, IIS via `web.config`). On nginx, `.htaccess` has no effect, so delete backups after downloading them, and delete archives you uploaded by FTP once the import is done.
+In `wp-content/hole-in-one-migration-<random>/`, a folder whose name contains 96 random bits and is not linked anywhere. Nothing in it is served by the web server: archives are downloaded through WordPress by administrators only. On Apache, LiteSpeed and IIS the folder also denies all web access (`.htaccess`, `web.config`); on nginx, where those files have no effect, the random name keeps it from being found. Still, delete backups after downloading them, and delete archives you uploaded by FTP once the import is done.
 
 = How do I set my own Buy Me a Coffee link? =
 
-Edit `HIO_BUYMEACOFFEE_URL` at the top of `hole-in-one-migration.php`, define it in `wp-config.php`, or use the `hio_buymeacoffee_url` filter. An empty string hides the box.
+Edit `HOLEMI_BUYMEACOFFEE_URL` at the top of `hole-in-one-migration.php`, define it in `wp-config.php`, or use the `holemi_buymeacoffee_url` filter. An empty string hides the box.
 
 == Changelog ==
+
+= 1.1.0 =
+* Changes from the WordPress.org plugin review.
+* All functions, classes, options, actions and scripts use the prefix `holemi` (was `hio`). Settings of earlier versions are not carried over.
+* The import no longer writes a must-use plugin. Instead, archive files are extracted into a staging folder and moved into place at the end, so the live site never runs half-extracted plugins or themes, and a cancelled import puts back the files it replaced.
+* Plugin, must-use plugin, theme and uploads folders outside `wp-content` are exported and restored where the new site keeps them. The new site keeps its own uploads folder setting.
+* Archives are no longer downloadable by their address: downloads go through WordPress for administrators only. The storage folder has a random name, so it cannot be found on nginx either. It moved from `wp-content/hio-migration/` to `wp-content/hole-in-one-migration-<random>/`; download backups you want to keep from the old folder by FTP, then delete it.
+* Archives with folders outside wp-content use archive format 2; older versions refuse them instead of leaving those folders out.
 
 = 1.0.3 =
 * The plugin slug and text domain are now hole-in-one-migration, matching the WordPress.org slug. If you installed an earlier version from GitHub, it shows up as a second plugin: download any backups you want to keep, delete the old version, then install this one (deleting an old version also deletes the backups).

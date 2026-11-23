@@ -17,7 +17,7 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Job state container.
  */
-class HIO_Job {
+class HOLEMI_Job {
 
 	const ID_RE = '/^(exp|imp)_[a-f0-9]{24}$/';
 
@@ -74,22 +74,22 @@ class HIO_Job {
 	 * Create a job.
 	 *
 	 * @param string $kind exp|imp.
-	 * @return HIO_Job
-	 * @throws HIO_Exception If the storage folder is not writable.
+	 * @return HOLEMI_Job
+	 * @throws HOLEMI_Exception If the storage folder is not writable.
 	 */
 	public static function create( $kind ) {
-		if ( ! HIO_Storage::ensure() ) {
+		if ( ! HOLEMI_Storage::ensure() ) {
 			/* translators: %s: folder path. */
-			throw new HIO_Exception( esc_html( sprintf( __( 'The folder %s is not writable. Please fix the folder permissions (755) and try again.', 'hole-in-one-migration' ), HIO_Storage::base() ) ) );
+			throw new HOLEMI_Exception( esc_html( sprintf( __( 'The folder %s is not writable. Please fix the folder permissions (755) and try again.', 'hole-in-one-migration' ), HOLEMI_Storage::base() ) ) );
 		}
 		$job     = new self();
 		$job->id = $kind . '_' . bin2hex( random_bytes( 12 ) );
-		$job->dir = HIO_Storage::dir( 'work' ) . '/' . $job->id;
+		$job->dir = HOLEMI_Storage::dir( 'work' ) . '/' . $job->id;
 		if ( ! wp_mkdir_p( $job->dir ) ) {
-			throw new HIO_Exception( esc_html__( 'Could not create the job folder.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'Could not create the job folder.', 'hole-in-one-migration' ) );
 		}
 		@file_put_contents( $job->dir . '/index.php', "<?php // Silence is golden.\n" ); // phpcs:ignore
-		$settings   = HIO_Util::settings();
+		$settings   = HOLEMI_Util::settings();
 		$job->state = array(
 			'id'       => $job->id,
 			'kind'     => $kind,
@@ -115,21 +115,21 @@ class HIO_Job {
 	 * Load a job by id.
 	 *
 	 * @param string $id Job id.
-	 * @return HIO_Job|null
+	 * @return HOLEMI_Job|null
 	 */
 	public static function load( $id ) {
 		if ( ! is_string( $id ) || ! preg_match( self::ID_RE, $id ) ) {
 			return null;
 		}
-		$dir  = HIO_Storage::dir( 'work' ) . '/' . $id;
+		$dir  = HOLEMI_Storage::dir( 'work' ) . '/' . $id;
 		$file = $dir . '/state.json';
 		if ( ! is_file( $file ) ) {
 			return null;
 		}
-		$state = json_decode( (string) file_get_contents( $file ), true ); // phpcs:ignore
+		$state = json_decode( (string) HOLEMI_Util::read_file( $file ), true );
 		if ( ! is_array( $state ) ) {
 			// A torn write is impossible (atomic rename) but keep a fallback.
-			$state = json_decode( (string) @file_get_contents( $file . '.bak' ), true ); // phpcs:ignore
+			$state = json_decode( (string) HOLEMI_Util::read_file( $file . '.bak' ), true );
 			if ( ! is_array( $state ) ) {
 				return null;
 			}
@@ -144,11 +144,11 @@ class HIO_Job {
 	/**
 	 * All unfinished jobs.
 	 *
-	 * @return HIO_Job[]
+	 * @return HOLEMI_Job[]
 	 */
 	public static function unfinished() {
 		$out = array();
-		foreach ( (array) glob( HIO_Storage::dir( 'work' ) . '/*', GLOB_ONLYDIR ) as $d ) {
+		foreach ( (array) glob( HOLEMI_Storage::dir( 'work' ) . '/*', GLOB_ONLYDIR ) as $d ) {
 			$job = self::load( basename( $d ) );
 			if ( $job && 'done' !== $job->state['phase'] ) {
 				$out[] = $job;
@@ -170,18 +170,18 @@ class HIO_Job {
 	/**
 	 * Atomically write the checkpoint.
 	 *
-	 * @throws HIO_Exception If writing fails.
+	 * @throws HOLEMI_Exception If writing fails.
 	 */
 	public function save() {
 		$this->state['updated'] = time();
 		$json = wp_json_encode( $this->state, JSON_INVALID_UTF8_SUBSTITUTE );
 		if ( false === $json ) {
-			throw new HIO_Exception( esc_html( 'Could not encode job state.' ) );
+			throw new HOLEMI_Exception( esc_html( 'Could not encode job state.' ) );
 		}
 		$file = $this->path( 'state.json' );
 		$tmp  = $file . '.tmp';
 		if ( false === @file_put_contents( $tmp, $json ) ) { // phpcs:ignore
-			throw new HIO_Exception( esc_html__( 'Could not save progress. Is the disk full?', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'Could not save progress. Is the disk full?', 'hole-in-one-migration' ) );
 		}
 		if ( is_file( $file ) ) {
 			@copy( $file, $file . '.bak' ); // phpcs:ignore
@@ -190,7 +190,7 @@ class HIO_Job {
 			// Windows cannot rename over an existing file.
 			@unlink( $file ); // phpcs:ignore
 			if ( ! @rename( $tmp, $file ) ) { // phpcs:ignore
-				throw new HIO_Exception( esc_html__( 'Could not save progress.', 'hole-in-one-migration' ) );
+				throw new HOLEMI_Exception( esc_html__( 'Could not save progress.', 'hole-in-one-migration' ) );
 			}
 		}
 	}
@@ -245,10 +245,10 @@ class HIO_Job {
 			}
 			$this->state['ok_streak'] = $streak;
 		}
-		$budget = HIO_Util::effective_budget( $this->state['budget'] );
-		HIO_Util::prepare_runtime( $budget );
+		$budget = HOLEMI_Util::effective_budget( $this->state['budget'] );
+		HOLEMI_Util::prepare_runtime( $budget );
 		$this->deadline = microtime( true ) + $budget;
-		$limit          = HIO_Util::memory_limit();
+		$limit          = HOLEMI_Util::memory_limit();
 		$this->mem_ceiling = $limit > 0 ? (int) ( $limit * 0.6 ) : 0;
 	}
 
@@ -319,6 +319,6 @@ class HIO_Job {
 	 */
 	public function destroy() {
 		$this->unlock();
-		HIO_Storage::rrmdir( $this->dir );
+		HOLEMI_Storage::rrmdir( $this->dir );
 	}
 }

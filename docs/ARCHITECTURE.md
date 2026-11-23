@@ -15,8 +15,8 @@ How Hole-in-One Migration stays reliable on hosts with strict limits, and how it
 | Extraction must resume mid-archive | Streaming tar parser with serializable state; checkpoints at gzip member boundaries (≤ 8 MB uncompressed each). |
 | Huge tables (millions of rows) | Keyset pagination on the primary key, also multi-column keys (`(a > x) OR (a = x AND b > y)`), so every query costs the same no matter how deep into the table. The dump streams rows unbuffered (constant memory). Search & replace works in bounded key windows, so no single query can run long, and commits one transaction per batch instead of one per row. |
 | Re-running SQL after a crash | One statement per line, byte-offset checkpoints, `INSERT` executed as `REPLACE`, `DROP TABLE IF EXISTS` before every `CREATE`. |
-| Site broken while importing | DB goes into temporary tables (`hiXXX_`) and is swapped in with one atomic `RENAME TABLE`. A temporary mu-plugin keeps half-extracted plugins and themes from loading during the plugin's own AJAX requests. |
-| Lost answer to the final swap (session is gone) | The swap saves checkpoints right before and after itself and writes a job marker into the imported options table. The `hio_status` endpoint works without a login session (the job id is the secret). The browser polls it, and it can finish the final cleanup even if the request that did the swap died. |
+| Site broken while importing | Files are extracted into a staging folder in the job folder, the DB into temporary tables (`hiXXX_`). At the end every top-level unit (one plugin, one theme, one uploads year, one wp-content folder) is moved into place with a single `rename()`; the unit it replaces is kept in the job folder until the import completes, so Cancel puts it back. Then the tables are swapped in with one atomic `RENAME TABLE`. Must-use plugins and drop-ins go in last, after the swap. Across disks, units are copied in resumable chunks instead. |
+| Lost answer to the final swap (session is gone) | The swap saves checkpoints right before and after itself and writes a job marker into the imported options table. The `holemi_status` endpoint works without a login session (the job id is the secret). The browser polls it, and it can finish the final cleanup even if the request that did the swap died. |
 | Serialized data | Token-level serialize parser (no `unserialize`, so no object instantiation) that rewrites string lengths; `strtr` so nothing is replaced twice. |
 | MySQL 8 → MariaDB | Collation/engine fallback, auto-named foreign keys, `sql_mode` without strict/zero-date checks, generated columns skipped, binary data as hex. |
 
@@ -25,19 +25,21 @@ How Hole-in-One Migration stays reliable on hosts with strict limits, and how it
 ```
 hole-in-one-migration/
   hole-in-one-migration.php       bootstrap, constants, Buy Me a Coffee URL
-  includes/class-hio-plugin.php    admin page, AJAX endpoints, downloads (HTTP Range), notices
-  includes/class-hio-job.php       job state, checkpoints, lock, time budget, log
-  includes/class-hio-exporter.php  scan -> database dump -> archive
-  includes/class-hio-importer.php  upload -> validate -> extract -> DB import -> search & replace -> swap
-  includes/class-hio-tar-writer.php / class-hio-tar-parser.php
-  includes/class-hio-zip-writer.php / class-hio-zip-reader.php
-  includes/class-hio-search-replace.php
-  includes/class-hio-db.php, class-hio-storage.php, class-hio-util.php
+  includes/class-holemi-plugin.php    admin page, AJAX endpoints, downloads (HTTP Range), notices
+  includes/class-holemi-job.php       job state, checkpoints, lock, time budget, log
+  includes/class-holemi-exporter.php  scan -> database dump -> archive
+  includes/class-holemi-importer.php  upload -> validate -> extract (staging) -> DB import -> search & replace -> move files into place -> swap
+  includes/class-holemi-tar-writer.php / class-holemi-tar-parser.php
+  includes/class-holemi-zip-writer.php / class-holemi-zip-reader.php
+  includes/class-holemi-search-replace.php
+  includes/class-holemi-db.php, class-holemi-storage.php, class-holemi-util.php
   admin/page.php, admin/help.php   UI and user instructions
   assets/admin.js, assets/admin.css
 ```
 
-Storage: `wp-content/hio-migration/{work,backups,import}`. Uninstalling the plugin deletes this folder, **including backups**.
+Storage: `wp-content/hole-in-one-migration-<24 random hex>/{work,backups,import}`, found again by its name on disk (not in the database, which an import replaces). Every folder has `index.php`, a deny-all `.htaccess` and `web.config`; on nginx the random name keeps it from being found. Archives are only served by the authenticated download handler. Uninstalling the plugin deletes this folder, **including backups**.
+
+Archive layout: `wp-content/...` for wp-content; a plugins, mu-plugins, themes or uploads folder outside wp-content is stored as `outside-wp-content/<role>/...`, and the manifest's `roots` map says which archive folder holds which role. The importer puts each role where the new site keeps it (`WP_PLUGIN_DIR`, `WPMU_PLUGIN_DIR`, `get_theme_root()`, `wp_upload_dir()`). Archives with outside folders say `format_version: 2`, so older versions refuse them instead of skipping those folders.
 
 ## Tested
 

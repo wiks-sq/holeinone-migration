@@ -16,7 +16,7 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Search & replace engine.
  */
-class HIO_Search_Replace {
+class HOLEMI_Search_Replace {
 
 	/**
 	 * Replacement map for strtr.

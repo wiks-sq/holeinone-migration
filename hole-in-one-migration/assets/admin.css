@@ -1,48 +1,48 @@
-.hio-wrap { max-width: 1200px; }
-.hio-title { display: flex; align-items: center; gap: 8px; }
-.hio-title .dashicons { font-size: 30px; width: 30px; height: 30px; color: #2e7d32; }
-.hio-tagline { font-size: 14px; color: #50575e; margin-top: 0; }
-.hio-layout { display: flex; gap: 20px; align-items: flex-start; margin-top: 16px; }
-.hio-main { flex: 1 1 auto; min-width: 0; }
-.hio-side { flex: 0 0 290px; }
-@media (max-width: 960px) { .hio-layout { flex-direction: column; } .hio-side { flex-basis: auto; width: 100%; } }
+.holemi-wrap { max-width: 1200px; }
+.holemi-title { display: flex; align-items: center; gap: 8px; }
+.holemi-title .dashicons { font-size: 30px; width: 30px; height: 30px; color: #2e7d32; }
+.holemi-tagline { font-size: 14px; color: #50575e; margin-top: 0; }
+.holemi-layout { display: flex; gap: 20px; align-items: flex-start; margin-top: 16px; }
+.holemi-main { flex: 1 1 auto; min-width: 0; }
+.holemi-side { flex: 0 0 290px; }
+@media (max-width: 960px) { .holemi-layout { flex-direction: column; } .holemi-side { flex-basis: auto; width: 100%; } }
 
-.hio-card { background: #fff; border: 1px solid #dcdcde; border-radius: 6px; padding: 16px 20px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
-.hio-card h2 { margin-top: 4px; }
-.hio-card h3 { margin: 18px 0 6px; }
-.hio-form fieldset { margin: 14px 0; padding: 12px 14px; border: 1px solid #e2e4e7; border-radius: 4px; }
-.hio-form legend { font-weight: 600; padding: 0 6px; }
-.hio-choice { display: block; padding: 8px 4px; }
-.hio-choice .description { display: block; margin-left: 24px; }
-.hio-badge { background: #2e7d32; color: #fff; font-size: 11px; padding: 2px 7px; border-radius: 10px; margin-left: 6px; vertical-align: middle; }
-.hio-warning { background: #fff8e5; border-left: 4px solid #dba617; padding: 4px 14px; margin: 10px 0 16px; }
-.hio-table { margin-top: 8px; }
-.hio-actions { white-space: nowrap; }
-.hio-actions .button { margin: 2px; }
+.holemi-card { background: #fff; border: 1px solid #dcdcde; border-radius: 6px; padding: 16px 20px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.holemi-card h2 { margin-top: 4px; }
+.holemi-card h3 { margin: 18px 0 6px; }
+.holemi-form fieldset { margin: 14px 0; padding: 12px 14px; border: 1px solid #e2e4e7; border-radius: 4px; }
+.holemi-form legend { font-weight: 600; padding: 0 6px; }
+.holemi-choice { display: block; padding: 8px 4px; }
+.holemi-choice .description { display: block; margin-left: 24px; }
+.holemi-badge { background: #2e7d32; color: #fff; font-size: 11px; padding: 2px 7px; border-radius: 10px; margin-left: 6px; vertical-align: middle; }
+.holemi-warning { background: #fff8e5; border-left: 4px solid #dba617; padding: 4px 14px; margin: 10px 0 16px; }
+.holemi-table { margin-top: 8px; }
+.holemi-actions { white-space: nowrap; }
+.holemi-actions .button { margin: 2px; }
 
-.hio-progress .hio-bar { position: relative; height: 26px; background: #f0f0f1; border-radius: 13px; overflow: hidden; margin: 12px 0; }
-.hio-progress .hio-bar span { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: linear-gradient(90deg, #43a047, #2e7d32); transition: width .4s ease; }
-.hio-progress .hio-bar em { position: absolute; width: 100%; text-align: center; line-height: 26px; font-style: normal; font-weight: 600; color: #1d2327; }
-.hio-msg { font-size: 14px; }
-.hio-note { padding: 8px 12px; border-radius: 4px; }
-.hio-note-warn { background: #fff8e5; border-left: 4px solid #dba617; }
-.hio-note-error { background: #fcf0f1; border-left: 4px solid #d63638; color: #8a2424; display: inline-block; }
-.hio-success { font-size: 16px; font-weight: 600; color: #2e7d32; }
-.hio-log { max-height: 260px; overflow: auto; background: #1d2327; color: #e6e6e6; padding: 10px; font-size: 12px; white-space: pre-wrap; word-break: break-all; border-radius: 4px; }
-.hio-logbox summary { cursor: pointer; color: #2271b1; margin-top: 8px; }
-.hio-resume-item { border-left: 4px solid #dba617; }
+.holemi-progress .holemi-bar { position: relative; height: 26px; background: #f0f0f1; border-radius: 13px; overflow: hidden; margin: 12px 0; }
+.holemi-progress .holemi-bar span { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: linear-gradient(90deg, #43a047, #2e7d32); transition: width .4s ease; }
+.holemi-progress .holemi-bar em { position: absolute; width: 100%; text-align: center; line-height: 26px; font-style: normal; font-weight: 600; color: #1d2327; }
+.holemi-msg { font-size: 14px; }
+.holemi-note { padding: 8px 12px; border-radius: 4px; }
+.holemi-note-warn { background: #fff8e5; border-left: 4px solid #dba617; }
+.holemi-note-error { background: #fcf0f1; border-left: 4px solid #d63638; color: #8a2424; display: inline-block; }
+.holemi-success { font-size: 16px; font-weight: 600; color: #2e7d32; }
+.holemi-log { max-height: 260px; overflow: auto; background: #1d2327; color: #e6e6e6; padding: 10px; font-size: 12px; white-space: pre-wrap; word-break: break-all; border-radius: 4px; }
+.holemi-logbox summary { cursor: pointer; color: #2271b1; margin-top: 8px; }
+.holemi-resume-item { border-left: 4px solid #dba617; }
 
-.hio-coffee { background: #fffbea; border-color: #f5d26b; }
-.hio-coffee-btn { display: inline-block; background: #ffdd00; color: #000 !important; font-weight: 700; padding: 10px 18px; border-radius: 8px; text-decoration: none; box-shadow: 0 2px 0 #d4b600; }
-.hio-coffee-btn:hover { background: #ffe433; }
-.hio-steps { padding-left: 18px; margin-left: 0; }
-.hio-steps li { margin-bottom: 6px; }
-.hio-envtable { width: 100%; font-size: 12px; border-collapse: collapse; }
-.hio-envtable th { text-align: left; font-weight: normal; color: #50575e; padding: 2px 0; }
-.hio-envtable td { text-align: right; font-family: monospace; }
+.holemi-coffee { background: #fffbea; border-color: #f5d26b; }
+.holemi-coffee-btn { display: inline-block; background: #ffdd00; color: #000 !important; font-weight: 700; padding: 10px 18px; border-radius: 8px; text-decoration: none; box-shadow: 0 2px 0 #d4b600; }
+.holemi-coffee-btn:hover { background: #ffe433; }
+.holemi-steps { padding-left: 18px; margin-left: 0; }
+.holemi-steps li { margin-bottom: 6px; }
+.holemi-envtable { width: 100%; font-size: 12px; border-collapse: collapse; }
+.holemi-envtable th { text-align: left; font-weight: normal; color: #50575e; padding: 2px 0; }
+.holemi-envtable td { text-align: right; font-family: monospace; }
 
-.hio-help h3 { display: flex; align-items: center; gap: 8px; }
-.hio-num { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: #2e7d32; color: #fff; font-size: 14px; }
-.hio-help ol li, .hio-help ul li { margin-bottom: 6px; }
-.hio-faq dt { font-weight: 600; margin-top: 12px; }
-.hio-faq dd { margin: 4px 0 0 0; color: #3c434a; }
+.holemi-help h3 { display: flex; align-items: center; gap: 8px; }
+.holemi-num { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: #2e7d32; color: #fff; font-size: 14px; }
+.holemi-help ol li, .holemi-help ul li { margin-bottom: 6px; }
+.holemi-faq dt { font-weight: 600; margin-top: 12px; }
+.holemi-faq dd { margin: 4px 0 0 0; color: #3c434a; }
