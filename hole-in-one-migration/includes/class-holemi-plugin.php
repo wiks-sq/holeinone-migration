@@ -62,16 +62,16 @@ class HOLEMI_Plugin {
 		add_filter( 'plugin_row_meta', array( $this, 'row_meta' ), 10, 2 );
 
 		foreach ( array( 'export_start', 'import_start', 'upload_chunk', 'step', 'cancel', 'delete_backup' ) as $a ) {
-			add_action( 'wp_ajax_hio_' . $a, array( $this, 'ajax_' . $a ) );
+			add_action( 'wp_ajax_holemi_' . $a, array( $this, 'ajax_' . $a ) );
 		}
 		// Status check that works without a login session: after the database
 		// swap the old session is gone, but the browser must still learn that
 		// the import finished. The 24-hex-digit job id acts as the secret.
-		add_action( 'wp_ajax_hio_status', array( $this, 'ajax_status' ) );
-		add_action( 'wp_ajax_nopriv_hio_status', array( $this, 'ajax_status' ) );
-		add_action( 'admin_post_hio_download', array( $this, 'download' ) );
-		add_action( 'admin_post_hio_dismiss', array( $this, 'dismiss' ) );
-		add_action( 'admin_post_hio_log', array( $this, 'download_log' ) );
+		add_action( 'wp_ajax_holemi_status', array( $this, 'ajax_status' ) );
+		add_action( 'wp_ajax_nopriv_holemi_status', array( $this, 'ajax_status' ) );
+		add_action( 'admin_post_holemi_download', array( $this, 'download' ) );
+		add_action( 'admin_post_holemi_dismiss', array( $this, 'dismiss' ) );
+		add_action( 'admin_post_holemi_log', array( $this, 'download_log' ) );
 		register_activation_hook( HOLEMI_FILE, array( __CLASS__, 'activate' ) );
 	}
 

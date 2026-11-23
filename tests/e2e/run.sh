@@ -12,7 +12,10 @@
 #  3. Site a is exported with this version; the import into site b is first
 #     cancelled just before the database swap (b must be unchanged), then run fully;
 #     tables, row counts, every file and the addresses are compared.
-#  4. Media moved outside wp-content on site a arrive in b's own uploads folder.
+#  4. Through the admin page over HTTP, as the browser does it (browser.php):
+#     export site a and download it, upload it to site b in chunks and import
+#     it, including the logout at the database switch.
+#  5. Media moved outside wp-content on site a arrive in b's own uploads folder.
 #
 # Environment: WP_IMAGE (default php8.5-apache), CLI_IMAGE (default cli),
 # PLUGIN_CHECK (1), OLD_REF (c1984fc = 1.0.2), E2E_LOG (tests/e2e/e2e-results.log).
@@ -234,7 +237,26 @@ for s in a b; do
   [ -z "$log" ] && pass "site $s: no PHP notices from the plugin" || { fail "site $s: PHP notices from the plugin:"; echo "$log"; }
 done
 
-echo "== 4. Uploads outside wp-content: site a keeps its media in /var/www/html/media"
+echo "== 4. The admin page over HTTP, as the browser uses it"
+# Runs the AJAX calls of assets/admin.js against Apache with a real login
+# cookie and nonce. The CLI steps above call the classes directly, so only
+# this catches a mismatch between the script and the server.
+browser() { # site args...
+  local s=$1 out; shift
+  out=$(dt exec -T "$s" php /e2e/browser.php "$(port_of "$s")" "$@" 2>&1); echo "$out"
+  echo "$out" | grep -q '^PASS' || FAIL=1
+  if echo "$out" | grep -q '^FAIL'; then FAIL=1; fi
+  return 0
+}
+browser a export /tmp/browser-export.zip
+dt cp a:/tmp/browser-export.zip "$TMP/browser-export.zip" >/dev/null 2>&1 \
+  && dt cp "$TMP/browser-export.zip" b:/tmp/browser-export.zip >/dev/null 2>&1 \
+  && dt exec -T -u 0 b chown 33:33 /tmp/browser-export.zip \
+  && browser b import /tmp/browser-export.zip || fail "could not hand the browser export to site b"
+[ "$(wps b option get home)" = http://localhost:8085 ] && pass "site b keeps its address after the browser import" || fail "site b address is $(wps b option get home)"
+front b
+
+echo "== 5. Uploads outside wp-content: site a keeps its media in /var/www/html/media"
 dt exec -T a-cli sh -c 'mv wp-content/uploads media'
 wps a option update upload_path media >/dev/null
 [ "$(wps a eval 'echo wp_upload_dir()["basedir"];')" = /var/www/html/media ] && pass "site a uploads folder is now /var/www/html/media" || fail "could not move the uploads folder of site a"
