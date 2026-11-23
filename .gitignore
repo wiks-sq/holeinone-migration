@@ -1,3 +1,6 @@
 *.zip
 .e2e-tmp/
 .DS_Store
+wporg_reply/
+tests/e2e/e2e-*.log
+tests/e2e/artifacts/

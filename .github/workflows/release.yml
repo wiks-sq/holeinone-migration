@@ -1,0 +1,42 @@
+# Publishing a release: push a tag that matches the plugin version, e.g.
+#   git tag v1.1.1 && git push origin v1.1.1
+# The full CI runs on the tagged commit; only if it passes is the zip built and
+# a GitHub release created with it (notes taken from the readme.txt changelog).
+# Uploading to WordPress.org is still done by hand.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Build zip and publish the release
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches the plugin version
+        run: tests/check-version.sh "$GITHUB_REF_NAME"
+      - name: Build hole-in-one-migration.zip
+        run: bin/build-zip.sh hole-in-one-migration.zip
+      - name: Release notes from the readme changelog
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          awk -v h="= $v =" '$0 == h {on=1; next} on && /^= / {exit} on' hole-in-one-migration/readme.txt > notes.md
+          [ -s notes.md ] || echo "Hole-in-One Migration $v" > notes.md
+          cat notes.md
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" hole-in-one-migration.zip \
+            --title "Hole-in-One Migration ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag

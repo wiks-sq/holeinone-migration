@@ -1,0 +1,74 @@
+# Throwaway WordPress sites for tests/e2e/run.sh. Removed after every run.
+#   pc   clean WordPress with internet access, only for WordPress.org Plugin Check
+#   old  the source site, running plugin 1.0.2 (taken from git history by run.sh)
+#   a    imports the archive made by 1.0.2, then exports with this version
+#   b    imports the archive made by a
+# Each site has a web container (Apache, PHP of WP_IMAGE) and a WP-CLI container
+# (PHP of CLI_IMAGE) that share the site files. The plugin runs in the CLI container.
+name: holemi-e2e
+
+x-plugin: &plugin { type: bind, source: ../../hole-in-one-migration, target: /var/www/html/wp-content/plugins/hole-in-one-migration, read_only: true }
+x-old-plugin: &old-plugin { type: bind, source: "${E2E_TMP:-./.e2e-tmp}/old-plugin/holeinone-migration", target: /var/www/html/wp-content/plugins/holeinone-migration, read_only: true }
+x-ini: &ini { type: bind, source: ./php.ini, target: /usr/local/etc/php/conf.d/zz-e2e.ini, read_only: true }
+x-step: &step { type: bind, source: ./cli-step.php, target: /e2e/cli-step.php, read_only: true }
+x-seed: &seed { type: bind, source: ./seed.php, target: /e2e/seed.php, read_only: true }
+x-db: &db
+  WORDPRESS_DB_HOST: db
+  WORDPRESS_DB_USER: root
+  WORDPRESS_DB_PASSWORD: root
+  WORDPRESS_DEBUG: "1"
+x-offline: &offline "define('WP_HTTP_BLOCK_EXTERNAL', true); define('DISABLE_WP_CRON', true); define('WP_DEBUG_LOG', true); define('WP_DEBUG_DISPLAY', false);"
+x-web: &web
+  image: "wordpress:${WP_IMAGE:-php8.5-apache}"
+  depends_on: [db]
+x-cli: &cli
+  image: "wordpress:${CLI_IMAGE:-cli}"
+  user: "33:33"
+  command: ["sleep", "infinity"]
+
+services:
+  db:
+    image: mysql:8.4
+    command: ["--max-allowed-packet=64M"]
+    environment: { MYSQL_ROOT_PASSWORD: root }
+    tmpfs: [ /var/lib/mysql ]
+
+  pc:
+    <<: *web
+    image: wordpress:php8.5-apache
+    environment: { <<: *db, WORDPRESS_DB_NAME: pc }
+    volumes: [ "vol-pc:/var/www/html", *plugin, *ini ]
+  pc-cli:
+    <<: *cli
+    image: wordpress:cli
+    environment: { <<: *db, WORDPRESS_DB_NAME: pc, HOME: /tmp }
+    volumes: [ "vol-pc:/var/www/html", *plugin, *ini ]
+
+  old:
+    <<: *web
+    environment: { <<: *db, WORDPRESS_DB_NAME: old, WORDPRESS_CONFIG_EXTRA: *offline }
+    volumes: [ "vol-old:/var/www/html", *old-plugin, *ini ]
+  old-cli:
+    <<: *cli
+    environment: { <<: *db, WORDPRESS_DB_NAME: old, WORDPRESS_CONFIG_EXTRA: *offline, HOME: /tmp }
+    volumes: [ "vol-old:/var/www/html", *old-plugin, *ini, *step, *seed ]
+
+  a:
+    <<: *web
+    environment: { <<: *db, WORDPRESS_DB_NAME: a, WORDPRESS_CONFIG_EXTRA: *offline }
+    volumes: [ "vol-a:/var/www/html", *plugin, *ini ]
+  a-cli:
+    <<: *cli
+    environment: { <<: *db, WORDPRESS_DB_NAME: a, WORDPRESS_CONFIG_EXTRA: *offline, HOME: /tmp }
+    volumes: [ "vol-a:/var/www/html", *plugin, *ini, *step ]
+
+  b:
+    <<: *web
+    environment: { <<: *db, WORDPRESS_DB_NAME: b, WORDPRESS_CONFIG_EXTRA: *offline }
+    volumes: [ "vol-b:/var/www/html", *plugin, *ini ]
+  b-cli:
+    <<: *cli
+    environment: { <<: *db, WORDPRESS_DB_NAME: b, WORDPRESS_CONFIG_EXTRA: *offline, HOME: /tmp }
+    volumes: [ "vol-b:/var/www/html", *plugin, *ini, *step ]
+
+volumes: { vol-pc: {}, vol-old: {}, vol-a: {}, vol-b: {} }
