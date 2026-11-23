@@ -11,7 +11,7 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Handler contract for parsed entries.
  */
-interface HIO_Tar_Handler {
+interface HOLEMI_Tar_Handler {
 
 	/**
 	 * A new entry starts.
@@ -40,7 +40,7 @@ interface HIO_Tar_Handler {
 /**
  * Tar stream parser.
  */
-class HIO_Tar_Parser {
+class HOLEMI_Tar_Parser {
 
 	/**
 	 * Parser state (persisted between requests).
@@ -52,17 +52,17 @@ class HIO_Tar_Parser {
 	/**
 	 * Handler.
 	 *
-	 * @var HIO_Tar_Handler
+	 * @var HOLEMI_Tar_Handler
 	 */
 	private $handler;
 
 	/**
 	 * Constructor.
 	 *
-	 * @param HIO_Tar_Handler $handler Handler.
+	 * @param HOLEMI_Tar_Handler $handler Handler.
 	 * @param array           $state   Saved state from export_state().
 	 */
-	public function __construct( HIO_Tar_Handler $handler, array $state = array() ) {
+	public function __construct( HOLEMI_Tar_Handler $handler, array $state = array() ) {
 		$this->handler = $handler;
 		$this->st      = array_merge(
 			array(
@@ -124,7 +124,7 @@ class HIO_Tar_Parser {
 	 * Feed decompressed bytes.
 	 *
 	 * @param string $data Bytes.
-	 * @throws HIO_Exception On a corrupt header.
+	 * @throws HOLEMI_Exception On a corrupt header.
 	 */
 	public function feed( $data ) {
 		$off = 0;
@@ -192,7 +192,7 @@ class HIO_Tar_Parser {
 	 * Handle one header block.
 	 *
 	 * @param string $h 512 bytes.
-	 * @throws HIO_Exception On checksum mismatch.
+	 * @throws HOLEMI_Exception On checksum mismatch.
 	 */
 	private function header( $h ) {
 		$st = &$this->st;
@@ -207,7 +207,7 @@ class HIO_Tar_Parser {
 			$sum += ord( $tmp[ $i ] );
 		}
 		if ( $sum !== $stored ) {
-			throw new HIO_Exception( esc_html__( 'The archive is damaged (bad tar header checksum). Please create and upload the archive again.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'The archive is damaged (bad tar header checksum). Please create and upload the archive again.', 'hole-in-one-migration' ) );
 		}
 		$name  = rtrim( substr( $h, 0, 100 ), "\0" );
 		$size  = self::num( substr( $h, 124, 12 ) );

@@ -20,7 +20,7 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Tar.gz writer.
  */
-class HIO_Tar_Writer {
+class HOLEMI_Tar_Writer {
 
 	/**
 	 * Start a new gzip member after this many uncompressed bytes. This keeps
@@ -61,7 +61,7 @@ class HIO_Tar_Writer {
 	 *
 	 * @param string $path  Archive path.
 	 * @param array  $state Saved state.
-	 * @throws HIO_Exception If the file cannot be opened.
+	 * @throws HOLEMI_Exception If the file cannot be opened.
 	 */
 	public function __construct( $path, array $state ) {
 		$this->st = array_merge(
@@ -73,11 +73,11 @@ class HIO_Tar_Writer {
 			$state
 		);
 		if ( ! function_exists( 'deflate_init' ) ) {
-			throw new HIO_Exception( esc_html__( 'The PHP zlib extension is missing. Choose the ZIP format in Settings or ask your host to enable zlib.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'The PHP zlib extension is missing. Choose the ZIP format in Settings or ask your host to enable zlib.', 'hole-in-one-migration' ) );
 		}
 		$this->fp = @fopen( $path, 'c+b' ); // phpcs:ignore
 		if ( ! $this->fp ) {
-			throw new HIO_Exception( esc_html__( 'Could not open the archive for writing.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'Could not open the archive for writing.', 'hole-in-one-migration' ) );
 		}
 		ftruncate( $this->fp, (int) $this->st['size'] );
 		fseek( $this->fp, 0, SEEK_END );
@@ -97,7 +97,7 @@ class HIO_Tar_Writer {
 		}
 		$out = deflate_add( $this->ctx, $data, ZLIB_NO_FLUSH );
 		if ( '' !== $out ) {
-			HIO_Util::fwrite_all( $this->fp, $out );
+			HOLEMI_Util::fwrite_all( $this->fp, $out );
 		}
 		$this->member_raw += strlen( $data );
 		if ( $this->member_raw >= self::MEMBER_CAP ) {
@@ -110,7 +110,7 @@ class HIO_Tar_Writer {
 	 */
 	private function end_member() {
 		if ( null !== $this->ctx ) {
-			HIO_Util::fwrite_all( $this->fp, deflate_add( $this->ctx, '', ZLIB_FINISH ) );
+			HOLEMI_Util::fwrite_all( $this->fp, deflate_add( $this->ctx, '', ZLIB_FINISH ) );
 			$this->ctx        = null;
 			$this->member_raw = 0;
 		}

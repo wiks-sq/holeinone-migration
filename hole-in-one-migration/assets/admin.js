@@ -8,7 +8,7 @@
 (function () {
 	'use strict';
 
-	var C = window.HIO || {};
+	var C = window.HOLEMI || {};
 	var T = C.i18n || {};
 	// wp_localize_script() turns numbers into strings.
 	C.chunk = parseInt(C.chunk, 10) || 1048576;
@@ -123,15 +123,15 @@
 
 	function Panel(container, title) {
 		var el = document.createElement('div');
-		el.className = 'hio-card hio-progress';
+		el.className = 'holemi-card holemi-progress';
 		el.innerHTML =
 			'<h2>' + esc(title) + '</h2>' +
-			'<div class="hio-bar"><span></span><em>0%</em></div>' +
-			'<p class="hio-msg"></p>' +
-			'<p class="hio-note" hidden></p>' +
-			'<div class="hio-result" hidden></div>' +
-			'<details class="hio-logbox"><summary>Log</summary><pre class="hio-log"></pre><p><a class="hio-loglink" href="#">Download full log</a></p></details>' +
-			'<p class="hio-buttons"></p>';
+			'<div class="holemi-bar"><span></span><em>0%</em></div>' +
+			'<p class="holemi-msg"></p>' +
+			'<p class="holemi-note" hidden></p>' +
+			'<div class="holemi-result" hidden></div>' +
+			'<details class="holemi-logbox"><summary>Log</summary><pre class="holemi-log"></pre><p><a class="holemi-loglink" href="#">Download full log</a></p></details>' +
+			'<p class="holemi-buttons"></p>';
 		container.innerHTML = '';
 		container.appendChild(el);
 		el.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -140,27 +140,27 @@
 	}
 	Panel.prototype.progress = function (pct, msg) {
 		pct = Math.max(0, Math.min(100, pct | 0));
-		$('.hio-bar span', this.el).style.width = pct + '%';
-		$('.hio-bar em', this.el).textContent = pct + '%';
-		if (msg) { $('.hio-msg', this.el).textContent = msg; }
+		$('.holemi-bar span', this.el).style.width = pct + '%';
+		$('.holemi-bar em', this.el).textContent = pct + '%';
+		if (msg) { $('.holemi-msg', this.el).textContent = msg; }
 	};
 	Panel.prototype.note = function (msg, kind) {
-		var n = $('.hio-note', this.el);
+		var n = $('.holemi-note', this.el);
 		n.hidden = !msg;
-		n.className = 'hio-note' + (kind ? ' hio-note-' + kind : '');
+		n.className = 'holemi-note' + (kind ? ' holemi-note-' + kind : '');
 		n.textContent = msg || '';
 	};
 	Panel.prototype.log = function (lines, warnings) {
 		if (!lines || !lines.length) { return; }
-		var pre = $('.hio-log', this.el);
+		var pre = $('.holemi-log', this.el);
 		pre.textContent += lines.join('\n') + '\n';
 		pre.scrollTop = pre.scrollHeight;
 		this.lines += lines.length;
 		$('summary', this.el).textContent = 'Log' + (warnings ? ' (' + warnings + ' warnings)' : '');
 	};
-	Panel.prototype.logUrl = function (url) { if (url) { $('.hio-loglink', this.el).href = url; } };
+	Panel.prototype.logUrl = function (url) { if (url) { $('.holemi-loglink', this.el).href = url; } };
 	Panel.prototype.buttons = function (list) {
-		var p = $('.hio-buttons', this.el);
+		var p = $('.holemi-buttons', this.el);
 		p.innerHTML = '';
 		(list || []).forEach(function (b) {
 			var x = document.createElement(b.href ? 'a' : 'button');
@@ -172,7 +172,7 @@
 		});
 	};
 	Panel.prototype.result = function (html) {
-		var r = $('.hio-result', this.el);
+		var r = $('.holemi-result', this.el);
 		r.hidden = !html;
 		r.innerHTML = html || '';
 	};
@@ -186,7 +186,7 @@
 			label: 'Cancel', danger: true, click: function () {
 				if (!window.confirm(T.confirmCancel)) { return; }
 				panel.cancelled = true;
-				api('hio_cancel', { job: job.id }).then(function () {
+				api('holemi_cancel', { job: job.id }).then(function () {
 					panel.progress(0, 'Cancelled.');
 					panel.note('');
 					panel.buttons([]);
@@ -205,7 +205,7 @@
 
 		function loop() {
 			if (panel.cancelled) { done(); return; }
-			api('hio_step', { job: job.id, retry: retry ? 1 : 0, resume: resume ? 1 : 0 }).then(function (r) {
+			api('holemi_step', { job: job.id, retry: retry ? 1 : 0, resume: resume ? 1 : 0 }).then(function (r) {
 				resume = false;
 				if (panel.cancelled) { done(); return; }
 
@@ -216,7 +216,7 @@
 						// server, so keep asking the (login-free) status endpoint.
 						var polls = 0;
 						var poll = function () {
-							api('hio_status', { job: job.id }).then(function (st) {
+							api('holemi_status', { job: job.id }).then(function (st) {
 								if (st.ok && st.data.phase === 'done') { finished(st.data, panel); done(); return; }
 								if (st.ok && st.data.status === 'error') { panel.note(T.expired, 'error'); panel.buttons([]); done(); return; }
 								if (++polls > 40) { panel.note(T.expired, 'error'); panel.buttons([]); done(); return; }
@@ -280,24 +280,23 @@
 	function finished(d, panel) {
 		panel.progress(100, d.message);
 		panel.buttons([]);
-		var warn = d.warnings ? '<p class="hio-note hio-note-warn">' + esc(d.warnings) + ' warning(s) – see the log below. Usually these are unreadable cache or temporary files and can be ignored.</p>' : '';
+		var warn = d.warnings ? '<p class="holemi-note holemi-note-warn">' + esc(d.warnings) + ' warning(s) – see the log below. Usually these are unreadable cache or temporary files and can be ignored.</p>' : '';
 		if (d.kind === 'exp' && d.result) {
 			panel.result(
-				'<p class="hio-success">✔ Your archive is ready: <code>' + esc(d.result.file) + '</code> (' + esc(d.result.size) + ')</p>' + warn +
-				'<p><a class="button button-primary button-hero" href="' + esc(d.result.direct) + '" download>Download archive</a> ' +
-				'<a class="button" href="' + esc(d.result.php) + '">Alternative download</a></p>' +
+				'<p class="holemi-success">✔ Your archive is ready: <code>' + esc(d.result.file) + '</code> (' + esc(d.result.size) + ')</p>' + warn +
+				'<p><a class="button button-primary button-hero" href="' + esc(d.result.php) + '">Download archive</a></p>' +
 				'<p><strong>Next:</strong> install a fresh WordPress at your new host, install Hole-in-One Migration there, and open Migration → Import.</p>'
 			);
 		} else if (d.kind === 'imp' && d.result) {
 			if (d.result.relogin) {
 				running = 0;
 				panel.result(
-					'<p class="hio-success">✔ Your site has been migrated!</p>' + warn +
+					'<p class="holemi-success">✔ Your site has been migrated!</p>' + warn +
 					'<p>You have been logged out because the users of the old site were imported. <strong>Log in with the username and password of the OLD site.</strong></p>' +
 					'<p><a class="button button-primary button-hero" href="' + esc(d.result.login) + '">Log in</a> <a class="button" href="' + esc(d.result.home) + '" target="_blank">View site</a></p>'
 				);
 			} else {
-				panel.result('<p class="hio-success">✔ Files imported.</p>' + warn + '<p><a class="button" href="' + esc(d.result.home) + '" target="_blank">View site</a></p>');
+				panel.result('<p class="holemi-success">✔ Files imported.</p>' + warn + '<p><a class="button" href="' + esc(d.result.home) + '" target="_blank">View site</a></p>');
 			}
 		}
 	}
@@ -316,7 +315,7 @@
 			if (panel.cancelled) { busy(false); return; }
 			if (offset >= file.size) { busy(false); runJob(job, panel, false); return; }
 			var blob = file.slice(offset, Math.min(file.size, offset + chunk));
-			api('hio_upload_chunk', { job: job.id, offset: offset, chunk: blob }, 300000).then(function (r) {
+			api('holemi_upload_chunk', { job: job.id, offset: offset, chunk: blob }, 300000).then(function (r) {
 				if (panel.cancelled) { busy(false); return; }
 				if (!r.ok) {
 					if (r.code === 'auth') { panel.note(T.expired, 'error'); busy(false); return; }
@@ -374,11 +373,11 @@
 	}
 
 	// Export.
-	var form = $('#hio-export-form');
+	var form = $('#holemi-export-form');
 	if (form) {
 		var toggle = function () {
 			var v = $('input[name="contents"]:checked', form).value;
-			$('.hio-files-only', form).hidden = (v === 'db');
+			$('.holemi-files-only', form).hidden = (v === 'db');
 		};
 		$all('input[name="contents"]', form).forEach(function (i) { i.addEventListener('change', toggle); });
 		toggle();
@@ -389,8 +388,8 @@
 				format: $('input[name="format"]:checked', form).value,
 				exclude_uploads: $('input[name="exclude_uploads"]', form).checked ? '1' : '0'
 			};
-			$('#hio-export-btn').disabled = true;
-			start('hio_export_start', fields, $('#hio-export-progress'), 'Exporting', function (job, panel) {
+			$('#holemi-export-btn').disabled = true;
+			start('holemi_export_start', fields, $('#holemi-export-progress'), 'Exporting', function (job, panel) {
 				runJob(job, panel, false);
 			});
 		});
@@ -398,10 +397,10 @@
 
 	// Import: upload.
 	var pendingUpload = null; // Job waiting for the user to re-select the file.
-	var upBtn = $('#hio-upload-btn');
+	var upBtn = $('#holemi-upload-btn');
 	if (upBtn) {
 		upBtn.addEventListener('click', function () {
-			var input = $('#hio-file');
+			var input = $('#holemi-file');
 			var file = input.files && input.files[0];
 			if (!file) { window.alert(T.chooseFile); return; }
 
@@ -412,54 +411,54 @@
 					return;
 				}
 				pendingUpload = null;
-				var p = new Panel($('#hio-import-progress'), 'Importing');
+				var p = new Panel($('#holemi-import-progress'), 'Importing');
 				upload(job, file, p, job.upload.received || 0);
 				return;
 			}
 			if (!window.confirm(T.confirmImport)) { return; }
 			upBtn.disabled = true;
-			start('hio_import_start', { source: 'upload', name: file.name, size: file.size }, $('#hio-import-progress'), 'Importing', function (job, panel) {
+			start('holemi_import_start', { source: 'upload', name: file.name, size: file.size }, $('#holemi-import-progress'), 'Importing', function (job, panel) {
 				upload(job, file, panel, 0);
 			});
 		});
 	}
 
 	// Import: file on server.
-	$all('.hio-import-server').forEach(function (b) {
+	$all('.holemi-import-server').forEach(function (b) {
 		b.addEventListener('click', function () {
 			if (!window.confirm(T.confirmImport)) { return; }
-			$all('.hio-import-server').forEach(function (x) { x.disabled = true; });
-			start('hio_import_start', { source: 'server', file: b.getAttribute('data-file') }, $('#hio-import-progress'), 'Importing', function (job, panel) {
+			$all('.holemi-import-server').forEach(function (x) { x.disabled = true; });
+			start('holemi_import_start', { source: 'server', file: b.getAttribute('data-file') }, $('#holemi-import-progress'), 'Importing', function (job, panel) {
 				runJob(job, panel, false);
 			});
 		});
 	});
 
 	// Delete backups.
-	$all('.hio-delete-backup').forEach(function (b) {
+	$all('.holemi-delete-backup').forEach(function (b) {
 		b.addEventListener('click', function () {
 			if (!window.confirm(T.confirmDelete)) { return; }
 			b.disabled = true;
-			api('hio_delete_backup', { file: b.getAttribute('data-file') }).then(function (r) {
+			api('holemi_delete_backup', { file: b.getAttribute('data-file') }).then(function (r) {
 				if (r.ok) { var tr = b.closest('tr'); if (tr) { tr.remove(); } } else { window.alert(r.message); b.disabled = false; }
 			});
 		});
 	});
 
 	// Unfinished jobs: offer resume / cancel.
-	var box = $('#hio-resume');
+	var box = $('#holemi-resume');
 	if (box && C.jobs && C.jobs.length) {
 		box.hidden = false;
 		C.jobs.forEach(function (job) {
 			var row = document.createElement('div');
-			row.className = 'hio-card hio-resume-item';
+			row.className = 'holemi-card holemi-resume-item';
 			var what = job.kind === 'exp' ? 'Export' : 'Import';
 			var when = new Date(job.created * 1000).toLocaleString();
 			row.innerHTML = '<p><strong>Unfinished ' + what + '</strong> (started ' + esc(when) + ') – ' + esc(job.message || job.phase) +
-				(job.status === 'error' ? '<br><span class="hio-note-error">' + esc(job.error) + '</span>' : '') + '</p>' +
-				'<p class="hio-buttons"></p><div class="hio-resume-panel"></div>';
+				(job.status === 'error' ? '<br><span class="holemi-note-error">' + esc(job.error) + '</span>' : '') + '</p>' +
+				'<p class="holemi-buttons"></p><div class="holemi-resume-panel"></div>';
 			box.appendChild(row);
-			var btns = $('.hio-buttons', row);
+			var btns = $('.holemi-buttons', row);
 			var resumeBtn = document.createElement('button');
 			resumeBtn.type = 'button';
 			resumeBtn.className = 'button button-primary';
@@ -468,17 +467,17 @@
 				if (job.phase === 'upload') {
 					pendingUpload = job;
 					var msg = fmt(T.reselect, job.upload ? job.upload.name : '');
-					if (!$('#hio-file')) {
+					if (!$('#holemi-file')) {
 						window.location.href = window.location.pathname + '?page=hole-in-one-migration&tab=import';
 						return;
 					}
 					if (upBtn) { upBtn.textContent = 'Resume upload'; upBtn.disabled = false; }
 					window.alert(msg);
-					$('#hio-file').focus();
+					$('#holemi-file').focus();
 					return;
 				}
 				btns.innerHTML = '';
-				var panel = new Panel($('.hio-resume-panel', row), what);
+				var panel = new Panel($('.holemi-resume-panel', row), what);
 				panel.progress(job.progress, job.message);
 				panel.log(job.log, job.warnings);
 				runJob(job, panel, true);
@@ -489,7 +488,7 @@
 			cancelBtn.textContent = 'Cancel';
 			cancelBtn.addEventListener('click', function () {
 				if (!window.confirm(T.confirmCancel)) { return; }
-				api('hio_cancel', { job: job.id }).then(function () { row.remove(); });
+				api('holemi_cancel', { job: job.id }).then(function () { row.remove(); });
 			});
 			btns.appendChild(resumeBtn);
 			btns.appendChild(document.createTextNode(' '));
@@ -497,7 +496,7 @@
 			var a = document.createElement('a');
 			a.href = job.logUrl;
 			a.textContent = 'Log';
-			a.className = 'hio-loglink';
+			a.className = 'holemi-loglink';
 			btns.appendChild(document.createTextNode(' '));
 			btns.appendChild(a);
 		});

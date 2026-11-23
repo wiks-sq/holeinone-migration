@@ -12,12 +12,12 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Exception used for errors that should be shown to the user.
  */
-class HIO_Exception extends Exception {}
+class HOLEMI_Exception extends Exception {}
 
 /**
  * Utility functions.
  */
-class HIO_Util {
+class HOLEMI_Util {
 
 	/**
 	 * Exception messages are HTML-escaped where they are created (so they are
@@ -32,7 +32,79 @@ class HIO_Util {
 		return html_entity_decode( $m, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
 	}
 
-	const OPTION = 'hio_settings';
+	/**
+	 * The wp-content folder. A full-site migration copies this folder itself
+	 * (drop-ins such as object-cache.php live directly in it), and WordPress
+	 * has no function that returns its path, so this is the one place where
+	 * the constant is read. Plugins, must-use plugins, themes and uploads are
+	 * resolved separately with roots(), because they may live elsewhere.
+	 *
+	 * @return string
+	 */
+	public static function content_dir() {
+		return untrailingslashit( wp_normalize_path( WP_CONTENT_DIR ) );
+	}
+
+	/**
+	 * The WordPress installation folder. Only used as a value: the old path is
+	 * replaced by the new one in the database (some plugins store absolute
+	 * paths), and the import folder is shown relative to it. Nothing is ever
+	 * written there.
+	 *
+	 * @return string
+	 */
+	public static function install_dir() {
+		return untrailingslashit( wp_normalize_path( ABSPATH ) );
+	}
+
+	/**
+	 * Folders that WordPress lets a site move out of wp-content, by role. Each
+	 * is resolved the way WordPress resolves it, so custom locations (set in
+	 * wp-config.php or by the upload_path option) are exported and restored
+	 * correctly.
+	 *
+	 * @return string[] role => absolute path.
+	 */
+	public static function roots() {
+		$up = wp_upload_dir( null, false );
+		return array(
+			'plugins'    => untrailingslashit( wp_normalize_path( WP_PLUGIN_DIR ) ),
+			'mu-plugins' => untrailingslashit( wp_normalize_path( WPMU_PLUGIN_DIR ) ),
+			'themes'     => untrailingslashit( wp_normalize_path( get_theme_root() ) ),
+			'uploads'    => untrailingslashit( wp_normalize_path( $up['basedir'] ) ),
+		);
+	}
+
+	/**
+	 * Is $path the folder $dir or inside it?
+	 *
+	 * @param string $path Path.
+	 * @param string $dir  Folder.
+	 * @return bool
+	 */
+	public static function inside( $path, $dir ) {
+		$path = untrailingslashit( wp_normalize_path( $path ) );
+		$dir  = untrailingslashit( wp_normalize_path( $dir ) );
+		return '' !== $dir && ( $path === $dir || 0 === strpos( $path, $dir . '/' ) );
+	}
+
+	/**
+	 * Read a small file from this server's disk (job state, archive metadata,
+	 * a held-back must-use plugin). Never used for remote content: stream
+	 * wrappers such as http:// or phar:// are refused.
+	 *
+	 * @param string $path Absolute local path.
+	 * @return string|false
+	 */
+	public static function read_file( $path ) {
+		$path = (string) $path;
+		if ( '' === $path || preg_match( '#^[a-z][a-z0-9+.-]*://#i', $path ) || ! is_file( $path ) ) {
+			return false;
+		}
+		return @file_get_contents( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents, WordPress.PHP.NoSilencedErrors.Discouraged -- Local file only, see above.
+	}
+
+	const OPTION = 'holemi_settings';
 
 	/**
 	 * Default settings.
@@ -172,7 +244,7 @@ class HIO_Util {
 			return untrailingslashit( (string) constant( $const ) );
 		}
 		global $wpdb;
-		return untrailingslashit( (string) HIO_DB::value( 'SELECT option_value FROM ' . self::ident( $wpdb->options ) . ' WHERE option_name = ' . HIO_DB::quote( $which ) . ' LIMIT 1' ) );
+		return untrailingslashit( (string) HOLEMI_DB::value( 'SELECT option_value FROM ' . self::ident( $wpdb->options ) . ' WHERE option_name = ' . HOLEMI_DB::quote( $which ) . ' LIMIT 1' ) );
 	}
 
 	/**
@@ -306,7 +378,7 @@ class HIO_Util {
 	 *
 	 * @param resource $fp   Stream.
 	 * @param string   $data Data.
-	 * @throws HIO_Exception When the disk is full or not writable.
+	 * @throws HOLEMI_Exception When the disk is full or not writable.
 	 */
 	public static function fwrite_all( $fp, $data ) {
 		$len = strlen( $data );
@@ -314,7 +386,7 @@ class HIO_Util {
 		while ( $off < $len ) {
 			$w = fwrite( $fp, 0 === $off ? $data : substr( $data, $off ) );
 			if ( false === $w || 0 === $w ) {
-				throw new HIO_Exception( esc_html__( 'Could not write to disk. Is the disk full or the folder not writable?', 'hole-in-one-migration' ) );
+				throw new HOLEMI_Exception( esc_html__( 'Could not write to disk. Is the disk full or the folder not writable?', 'hole-in-one-migration' ) );
 			}
 			$off += $w;
 		}

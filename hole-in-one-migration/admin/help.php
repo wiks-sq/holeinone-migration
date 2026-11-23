@@ -7,34 +7,39 @@
 
 defined( 'ABSPATH' ) || exit;
 ?>
-<div class="hio-card hio-help">
+<div class="holemi-card holemi-help">
 	<h2><?php esc_html_e( 'How to move your site to a new host', 'hole-in-one-migration' ); ?></h2>
 	<p><?php esc_html_e( 'Plan about 15 minutes for a small site and an hour or more for a site with many gigabytes of media. You do not need any technical knowledge.', 'hole-in-one-migration' ); ?></p>
 
-	<h3><span class="hio-num">1</span> <?php esc_html_e( 'Export the old site', 'hole-in-one-migration' ); ?></h3>
+	<h3><span class="holemi-num">1</span> <?php esc_html_e( 'Export the old site', 'hole-in-one-migration' ); ?></h3>
 	<ol>
 		<li><?php esc_html_e( 'On the OLD site, install and activate Hole-in-One Migration (Plugins → Add New).', 'hole-in-one-migration' ); ?></li>
 		<li><?php esc_html_e( 'Go to Migration → Export. Keep the default "Website + database in one file" and click "Start export".', 'hole-in-one-migration' ); ?></li>
 		<li><?php esc_html_e( 'Keep the browser tab open until it says "Export complete". You may use other tabs meanwhile. If your connection drops or the computer goes to sleep, just come back to this page and click "Resume".', 'hole-in-one-migration' ); ?></li>
-		<li><?php esc_html_e( 'Click "Download" and save the file on your computer. If the download link shows an error, use "Alternative download".', 'hole-in-one-migration' ); ?></li>
+		<li><?php esc_html_e( 'Click "Download" and save the file on your computer. An interrupted download can be resumed by the browser or a download manager.', 'hole-in-one-migration' ); ?></li>
 	</ol>
 
-	<h3><span class="hio-num">2</span> <?php esc_html_e( 'Prepare the new host', 'hole-in-one-migration' ); ?></h3>
+	<h3><span class="holemi-num">2</span> <?php esc_html_e( 'Prepare the new host', 'hole-in-one-migration' ); ?></h3>
 	<ol>
 		<li><?php esc_html_e( 'At the new host, install a fresh, empty WordPress (most hosts have a "1-click WordPress install"). Any username and password is fine: they will be replaced by your old ones.', 'hole-in-one-migration' ); ?></li>
 		<li><?php esc_html_e( 'Not moved your domain yet? Use the temporary address your new host gives you (for example a staging or preview URL). The plugin changes all links to the new address automatically.', 'hole-in-one-migration' ); ?></li>
 		<li><?php esc_html_e( 'Install and activate Hole-in-One Migration on the new site. Do not install other plugins: they will come from your backup.', 'hole-in-one-migration' ); ?></li>
 	</ol>
 
-	<h3><span class="hio-num">3</span> <?php esc_html_e( 'Import on the new site', 'hole-in-one-migration' ); ?></h3>
+	<h3><span class="holemi-num">3</span> <?php esc_html_e( 'Import on the new site', 'hole-in-one-migration' ); ?></h3>
 	<ol>
 		<li><?php esc_html_e( 'Go to Migration → Import, choose the downloaded file and click "Upload and import". Confirm the warning.', 'hole-in-one-migration' ); ?></li>
-		<li><?php esc_html_e( 'Very large file or slow upload? Upload it with FTP/SFTP or your host\'s file manager into wp-content/hio-migration/import/ instead, reload the Import page and click "Import this file".', 'hole-in-one-migration' ); ?></li>
+		<li>
+			<?php
+			/* translators: %s: folder path */
+			echo esc_html( sprintf( __( 'Very large file or slow upload? Upload it with FTP/SFTP or your host\'s file manager into %s instead, reload the Import page and click "Import this file". The folder has a random name so that nobody can guess it.', 'hole-in-one-migration' ), HOLEMI_Plugin::import_folder_label() ) );
+			?>
+		</li>
 		<li><?php esc_html_e( 'Wait for "Import complete". You are then logged out automatically.', 'hole-in-one-migration' ); ?></li>
 		<li><strong><?php esc_html_e( 'Log in with the username and password of your OLD site.', 'hole-in-one-migration' ); ?></strong></li>
 	</ol>
 
-	<h3><span class="hio-num">4</span> <?php esc_html_e( 'Check and go live', 'hole-in-one-migration' ); ?></h3>
+	<h3><span class="holemi-num">4</span> <?php esc_html_e( 'Check and go live', 'hole-in-one-migration' ); ?></h3>
 	<ol>
 		<li><?php esc_html_e( 'Open a few pages, posts and images. If pages show "Not found", go to Settings → Permalinks and click "Save Changes" once.', 'hole-in-one-migration' ); ?></li>
 		<li><?php esc_html_e( 'If you used a temporary address: when you point your domain to the new host, change the address under Settings → General, or simply export the new site again and import it once the domain points to it.', 'hole-in-one-migration' ); ?></li>
@@ -49,20 +54,25 @@ defined( 'ABSPATH' ) || exit;
 		<li><?php esc_html_e( 'Even single huge files (videos, big databases) are processed piece by piece across many requests.', 'hole-in-one-migration' ); ?></li>
 		<li><?php esc_html_e( 'If a request still fails (timeout, error 500/502/503/504, lost connection), the browser waits and retries automatically from the last saved point, with smaller chunks. Nothing is done twice and nothing is lost.', 'hole-in-one-migration' ); ?></li>
 		<li><?php esc_html_e( 'Uploads are sent in small pieces, so the host\'s upload size limit does not matter.', 'hole-in-one-migration' ); ?></li>
-		<li><?php esc_html_e( 'The new site stays online during the import: the database goes into temporary tables and is switched over in a single atomic step at the very end.', 'hole-in-one-migration' ); ?></li>
+		<li><?php esc_html_e( 'The new site stays online during the import: files are extracted into a staging folder and the database into temporary tables. At the very end the files are moved into place folder by folder and the database is switched over in a single atomic step. Cancel before that, and the site is left as it was.', 'hole-in-one-migration' ); ?></li>
 		<li><?php esc_html_e( 'Addresses are replaced safely, including inside serialized data (widgets, page builders, theme options) and JSON.', 'hole-in-one-migration' ); ?></li>
 	</ul>
 
 	<h2><?php esc_html_e( 'Troubleshooting', 'hole-in-one-migration' ); ?></h2>
-	<dl class="hio-faq">
+	<dl class="holemi-faq">
 		<dt><?php esc_html_e( 'It shows "retrying" many times', 'hole-in-one-migration' ); ?></dt>
 		<dd><?php esc_html_e( 'The server is slow or busy. Let it continue: the plugin reduces the chunk size by itself. If it gives up, click "Retry". You can also lower "Work time per request" to 5–8 seconds in Settings.', 'hole-in-one-migration' ); ?></dd>
 
 		<dt><?php esc_html_e( 'I closed the browser / my computer went to sleep', 'hole-in-one-migration' ); ?></dt>
 		<dd><?php esc_html_e( 'Open the Migration page again and click "Resume" at the top. For an interrupted upload, choose the same file again: it continues where it stopped.', 'hole-in-one-migration' ); ?></dd>
 
-		<dt><?php esc_html_e( 'The download link gives 403 Forbidden or 404', 'hole-in-one-migration' ); ?></dt>
-		<dd><?php esc_html_e( 'Some security settings block direct file downloads. Use "Alternative download" (streams through WordPress and supports resuming) or download the file from wp-content/hio-migration/backups/ via FTP.', 'hole-in-one-migration' ); ?></dd>
+		<dt><?php esc_html_e( 'The download stops or is very slow', 'hole-in-one-migration' ); ?></dt>
+		<dd>
+			<?php
+			/* translators: %s: folder path */
+			echo esc_html( sprintf( __( 'Start it again: the download supports resuming, so a browser or download manager continues where it stopped. You can also fetch the file by FTP from %s.', 'hole-in-one-migration' ), str_replace( '/import/', '/backups/', HOLEMI_Plugin::import_folder_label() ) ) );
+			?>
+		</dd>
 
 		<dt><?php esc_html_e( '"Not enough disk space"', 'hole-in-one-migration' ); ?></dt>
 		<dd><?php esc_html_e( 'Delete old backups (Backups tab and other backup plugins), or exclude big folders under Settings → Also exclude and copy those by FTP.', 'hole-in-one-migration' ); ?></dd>

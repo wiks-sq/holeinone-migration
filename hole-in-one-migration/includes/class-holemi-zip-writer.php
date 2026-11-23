@@ -18,7 +18,7 @@ defined( 'ABSPATH' ) || exit;
 /**
  * ZIP writer.
  */
-class HIO_Zip_Writer {
+class HOLEMI_Zip_Writer {
 
 	const MAX32 = 0xFFFFFFFF;
 
@@ -49,7 +49,7 @@ class HIO_Zip_Writer {
 	 * @param string $path    Archive path.
 	 * @param string $cd_path Side file for central directory records.
 	 * @param array  $state   Saved state.
-	 * @throws HIO_Exception If files cannot be opened.
+	 * @throws HOLEMI_Exception If files cannot be opened.
 	 */
 	public function __construct( $path, $cd_path, array $state ) {
 		$this->st = array_merge(
@@ -64,7 +64,7 @@ class HIO_Zip_Writer {
 		$this->fp = @fopen( $path, 'c+b' ); // phpcs:ignore
 		$this->cd = @fopen( $cd_path, 'c+b' ); // phpcs:ignore
 		if ( ! $this->fp || ! $this->cd ) {
-			throw new HIO_Exception( esc_html__( 'Could not open the archive for writing.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'Could not open the archive for writing.', 'hole-in-one-migration' ) );
 		}
 		ftruncate( $this->fp, (int) $this->st['size'] );
 		fseek( $this->fp, 0, SEEK_END );
@@ -116,7 +116,7 @@ class HIO_Zip_Writer {
 			strlen( $name ),
 			strlen( $extra )
 		) . $name . $extra;
-		HIO_Util::fwrite_all( $this->fp, $h );
+		HOLEMI_Util::fwrite_all( $this->fp, $h );
 		return $offset;
 	}
 
@@ -168,7 +168,7 @@ class HIO_Zip_Writer {
 			$mode,
 			min( $offset, self::MAX32 )
 		) . $name . $extra;
-		HIO_Util::fwrite_all( $this->cd, $rec );
+		HOLEMI_Util::fwrite_all( $this->cd, $rec );
 		$this->st['cd_size'] += strlen( $rec );
 		$this->st['count']++;
 	}
@@ -204,7 +204,7 @@ class HIO_Zip_Writer {
 			}
 		}
 		$off = $this->local_header( $name, $method, $crc, strlen( $body ), strlen( $data ), $mtime );
-		HIO_Util::fwrite_all( $this->fp, $body );
+		HOLEMI_Util::fwrite_all( $this->fp, $body );
 		$this->central( $name, $method, $crc, strlen( $body ), strlen( $data ), $mtime, $off, false );
 	}
 
@@ -241,8 +241,8 @@ class HIO_Zip_Writer {
 		if ( '' === $data ) {
 			return;
 		}
-		HIO_Util::fwrite_all( $this->fp, $data );
-		$e['crc']      = HIO_Util::crc32_combine( $e['crc'], crc32( $data ), strlen( $data ) );
+		HOLEMI_Util::fwrite_all( $this->fp, $data );
+		$e['crc']      = HOLEMI_Util::crc32_combine( $e['crc'], crc32( $data ), strlen( $data ) );
 		$e['written'] += strlen( $data );
 	}
 
@@ -256,7 +256,7 @@ class HIO_Zip_Writer {
 			$e = $this->st['entry'];
 		}
 		fseek( $this->fp, $e['off'] + 14 );
-		HIO_Util::fwrite_all( $this->fp, pack( 'V', $e['crc'] ) );
+		HOLEMI_Util::fwrite_all( $this->fp, pack( 'V', $e['crc'] ) );
 		fseek( $this->fp, 0, SEEK_END );
 		$name = base64_decode( $e['name'] ); // phpcs:ignore
 		$this->central( $name, 0, $e['crc'], $e['size'], $e['size'], $e['mtime'], $e['off'], false );
@@ -275,19 +275,19 @@ class HIO_Zip_Writer {
 			if ( false === $buf || '' === $buf ) {
 				break;
 			}
-			HIO_Util::fwrite_all( $this->fp, $buf );
+			HOLEMI_Util::fwrite_all( $this->fp, $buf );
 		}
 		$cd_size = $this->st['cd_size'];
 		$count   = $this->st['count'];
 		if ( $count >= 0xFFFF || $cd_offset >= self::MAX32 || $cd_size >= self::MAX32 ) {
 			$z64_off = ftell( $this->fp );
-			HIO_Util::fwrite_all(
+			HOLEMI_Util::fwrite_all(
 				$this->fp,
 				pack( 'VPvvVVPPPP', 0x06064b50, 44, ( 3 << 8 ) | 45, 45, 0, 0, $count, $count, $cd_size, $cd_offset )
 			);
-			HIO_Util::fwrite_all( $this->fp, pack( 'VVPV', 0x07064b50, 0, $z64_off, 1 ) );
+			HOLEMI_Util::fwrite_all( $this->fp, pack( 'VVPV', 0x07064b50, 0, $z64_off, 1 ) );
 		}
-		HIO_Util::fwrite_all(
+		HOLEMI_Util::fwrite_all(
 			$this->fp,
 			pack(
 				'VvvvvVVv',

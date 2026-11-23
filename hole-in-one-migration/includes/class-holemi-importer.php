@@ -1,12 +1,17 @@
 <?php
 /**
- * Import: upload (chunked) -> validate -> extract -> import database into
- * temporary tables -> search & replace -> atomic table swap.
+ * Import: upload (chunked) -> validate -> extract into a staging folder ->
+ * import database into temporary tables -> search & replace -> move the
+ * staged files into place -> atomic table swap.
  *
- * The live site keeps running on its current database until the very last
- * step, which swaps all tables in one atomic RENAME TABLE statement. If
- * anything fails before that, the site is untouched and the import can be
- * resumed or cancelled.
+ * The live site keeps running on its own files and database while the archive
+ * is extracted and imported: files go into a staging folder inside the job
+ * folder, tables get a temporary prefix. Only at the end are the staged
+ * folders moved into place (one rename per plugin, theme or uploads year; the
+ * folders they replace are kept until the end, so a cancelled import puts
+ * them back), and then all tables are swapped in one atomic RENAME TABLE.
+ * Must-use plugins and drop-ins, which WordPress loads on every request, are
+ * put in place last, after the swap.
  *
  * @package HoleInOneMigration
  */
@@ -18,9 +23,15 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Importer.
  */
-class HIO_Importer implements HIO_Tar_Handler {
+class HOLEMI_Importer implements HOLEMI_Tar_Handler {
 
-	const GUARD_FILE = '0000-hio-import-guard.php';
+	/** Archive folder of each role in archives without a "roots" map (before 1.1.0). */
+	const DEFAULT_ROOTS = array(
+		'plugins'    => 'wp-content/plugins',
+		'mu-plugins' => 'wp-content/mu-plugins',
+		'themes'     => 'wp-content/themes',
+		'uploads'    => 'wp-content/uploads',
+	);
 
 	/** Entries up to this size are extracted in one go. */
 	const SMALL_ENTRY = 8388608;
@@ -28,7 +39,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 	/**
 	 * Current job (while extracting).
 	 *
-	 * @var HIO_Job
+	 * @var HOLEMI_Job
 	 */
 	private $job;
 
@@ -46,28 +57,38 @@ class HIO_Importer implements HIO_Tar_Handler {
 	/**
 	 * Common job setup.
 	 *
-	 * @return HIO_Job
+	 * @return HOLEMI_Job
 	 */
 	private static function new_job() {
 		global $wpdb;
 		if ( is_multisite() ) {
-			throw new HIO_Exception( esc_html__( 'WordPress Multisite is not supported.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'WordPress Multisite is not supported.', 'hole-in-one-migration' ) );
 		}
-		$job              = HIO_Job::create( 'imp' );
-		$settings         = HIO_Util::settings();
+		$job              = HOLEMI_Job::create( 'imp' );
+		$settings         = HOLEMI_Util::settings();
 		$up               = wp_upload_dir( null, false );
 		$job->state['target'] = array(
-			'home'         => HIO_Util::raw_url( 'home' ),
-			'siteurl'      => HIO_Util::raw_url( 'siteurl' ),
-			'db_home'      => (string) HIO_DB::value( 'SELECT option_value FROM ' . HIO_Util::ident( $wpdb->options ) . " WHERE option_name = 'home'" ),
-			'db_siteurl'   => (string) HIO_DB::value( 'SELECT option_value FROM ' . HIO_Util::ident( $wpdb->options ) . " WHERE option_name = 'siteurl'" ),
-			'content_url'  => HIO_Util::raw_content_urls()[0],
-			'uploads_url'  => HIO_Util::raw_content_urls()[1],
-			'abspath'      => untrailingslashit( wp_normalize_path( ABSPATH ) ),
-			'content_dir'  => untrailingslashit( wp_normalize_path( WP_CONTENT_DIR ) ),
+			'home'         => HOLEMI_Util::raw_url( 'home' ),
+			'siteurl'      => HOLEMI_Util::raw_url( 'siteurl' ),
+			'db_home'      => (string) HOLEMI_DB::value( 'SELECT option_value FROM ' . HOLEMI_Util::ident( $wpdb->options ) . " WHERE option_name = 'home'" ),
+			'db_siteurl'   => (string) HOLEMI_DB::value( 'SELECT option_value FROM ' . HOLEMI_Util::ident( $wpdb->options ) . " WHERE option_name = 'siteurl'" ),
+			'content_url'  => HOLEMI_Util::raw_content_urls()[0],
+			'uploads_url'  => HOLEMI_Util::raw_content_urls()[1],
+			'abspath'      => HOLEMI_Util::install_dir(),
+			'content_dir'  => HOLEMI_Util::content_dir(),
 			'uploads_dir'  => untrailingslashit( wp_normalize_path( $up['basedir'] ) ),
+			// Where this site keeps each role. Taken now: after the database swap
+			// the upload path could come from the imported options.
+			'dirs'         => array_merge( array( 'content' => HOLEMI_Util::content_dir() ), HOLEMI_Util::roots() ),
+			'plugin_dir'   => untrailingslashit( wp_normalize_path( plugin_dir_path( HOLEMI_FILE ) ) ),
+			// The uploads location is also a database setting. This site's value
+			// is kept, because the media files are put where this site keeps them.
+			'upload_opts'  => array(
+				'upload_path'     => HOLEMI_DB::value( 'SELECT option_value FROM ' . HOLEMI_Util::ident( $wpdb->options ) . " WHERE option_name = 'upload_path'" ),
+				'upload_url_path' => HOLEMI_DB::value( 'SELECT option_value FROM ' . HOLEMI_Util::ident( $wpdb->options ) . " WHERE option_name = 'upload_url_path'" ),
+			),
 			'prefix'       => $wpdb->prefix,
-			'plugin'       => plugin_basename( HIO_FILE ),
+			'plugin'       => plugin_basename( HOLEMI_FILE ),
 			'delete_after' => ! empty( $settings['delete_after'] ),
 		);
 		return $job;
@@ -78,20 +99,20 @@ class HIO_Importer implements HIO_Tar_Handler {
 	 *
 	 * @param string $name File name.
 	 * @param int    $size File size.
-	 * @return HIO_Job
-	 * @throws HIO_Exception On invalid input.
+	 * @return HOLEMI_Job
+	 * @throws HOLEMI_Exception On invalid input.
 	 */
 	public static function start_upload( $name, $size ) {
 		if ( ! preg_match( '/\.(tar\.gz|tgz|zip)$/i', $name ) ) {
-			throw new HIO_Exception( esc_html__( 'Please choose a .tar.gz or .zip archive created by Hole-in-One Migration.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'Please choose a .tar.gz or .zip archive created by Hole-in-One Migration.', 'hole-in-one-migration' ) );
 		}
 		if ( $size <= 0 ) {
-			throw new HIO_Exception( esc_html__( 'The file is empty.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'The file is empty.', 'hole-in-one-migration' ) );
 		}
-		$free = HIO_Util::free_space( HIO_Storage::base() );
+		$free = HOLEMI_Util::free_space( HOLEMI_Storage::base() );
 		if ( null !== $free && $free < $size * 1.1 ) {
 			/* translators: 1: size the archive needs, 2: free disk space. */
-			throw new HIO_Exception( esc_html( sprintf( __( 'Not enough disk space: the archive needs %1$s, but only %2$s is free on this server.', 'hole-in-one-migration' ), HIO_Util::size( $size ), HIO_Util::size( $free ) ) ) );
+			throw new HOLEMI_Exception( esc_html( sprintf( __( 'Not enough disk space: the archive needs %1$s, but only %2$s is free on this server.', 'hole-in-one-migration' ), HOLEMI_Util::size( $size ), HOLEMI_Util::size( $free ) ) ) );
 		}
 		$job                     = self::new_job();
 		$ext                     = preg_match( '/\.zip$/i', $name ) ? 'zip' : 'tar.gz';
@@ -104,29 +125,29 @@ class HIO_Importer implements HIO_Tar_Handler {
 			'received' => 0,
 		);
 		$job->state['message']   = __( 'Uploading…', 'hole-in-one-migration' );
-		$job->log( sprintf( 'Import started (browser upload): %s, %s', sanitize_file_name( $name ), HIO_Util::size( $size ) ) );
+		$job->log( sprintf( 'Import started (browser upload): %s, %s', sanitize_file_name( $name ), HOLEMI_Util::size( $size ) ) );
 		$job->save();
 		return $job;
 	}
 
 	/**
-	 * Start an import from a file in wp-content/hio-migration/import/.
+	 * Start an import from a file in the storage folder's import/ folder.
 	 *
 	 * @param string $name File name.
-	 * @return HIO_Job
-	 * @throws HIO_Exception If the file does not exist.
+	 * @return HOLEMI_Job
+	 * @throws HOLEMI_Exception If the file does not exist.
 	 */
 	public static function start_server_file( $name ) {
 		$name = basename( (string) $name );
-		$path = HIO_Storage::dir( 'import' ) . '/' . $name;
+		$path = HOLEMI_Storage::dir( 'import' ) . '/' . $name;
 		if ( ! preg_match( '/\.(tar\.gz|tgz|zip)$/i', $name ) || ! is_file( $path ) ) {
-			throw new HIO_Exception( esc_html__( 'That file was not found in the import folder.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'That file was not found in the import folder.', 'hole-in-one-migration' ) );
 		}
 		$job                       = self::new_job();
 		$job->state['phase']       = 'validate';
 		$job->state['archive']     = $path;
 		$job->state['own_archive'] = false;
-		$job->log( sprintf( 'Import started (server file): %s, %s', $name, HIO_Util::size( filesize( $path ) ) ) );
+		$job->log( sprintf( 'Import started (server file): %s, %s', $name, HOLEMI_Util::size( filesize( $path ) ) ) );
 		$job->save();
 		return $job;
 	}
@@ -134,15 +155,15 @@ class HIO_Importer implements HIO_Tar_Handler {
 	/**
 	 * Receive one upload chunk. Idempotent: a chunk sent twice is harmless.
 	 *
-	 * @param HIO_Job $job    Job.
+	 * @param HOLEMI_Job $job    Job.
 	 * @param int     $offset Offset of this chunk.
 	 * @param string  $tmp    Uploaded temp file.
 	 * @return int Bytes on the server after this chunk.
-	 * @throws HIO_Exception On error.
+	 * @throws HOLEMI_Exception On error.
 	 */
-	public static function upload_chunk( HIO_Job $job, $offset, $tmp ) {
+	public static function upload_chunk( HOLEMI_Job $job, $offset, $tmp ) {
 		if ( 'upload' !== $job->state['phase'] ) {
-			throw new HIO_Exception( esc_html__( 'This import is not waiting for an upload.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'This import is not waiting for an upload.', 'hole-in-one-migration' ) );
 		}
 		$part = $job->state['archive'] . '.part';
 		clearstatcache( true, $part );
@@ -153,7 +174,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 		$fp = @fopen( $part, 'c+b' ); // phpcs:ignore
 		$in = @fopen( $tmp, 'rb' ); // phpcs:ignore
 		if ( ! $fp || ! $in ) {
-			throw new HIO_Exception( esc_html__( 'Could not store the uploaded chunk.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'Could not store the uploaded chunk.', 'hole-in-one-migration' ) );
 		}
 		ftruncate( $fp, $offset );
 		fseek( $fp, $offset );
@@ -162,7 +183,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 			if ( false === $buf ) {
 				break;
 			}
-			HIO_Util::fwrite_all( $fp, $buf );
+			HOLEMI_Util::fwrite_all( $fp, $buf );
 		}
 		fclose( $in );
 		fflush( $fp );
@@ -173,7 +194,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 		$up['received'] = $have;
 		$job->state['progress'] = (int) ( 10 * $have / max( 1, $up['size'] ) );
 		/* translators: 1: size uploaded, 2: total size. */
-		$job->state['message']  = sprintf( __( 'Uploading: %1$s of %2$s', 'hole-in-one-migration' ), HIO_Util::size( $have ), HIO_Util::size( $up['size'] ) );
+		$job->state['message']  = sprintf( __( 'Uploading: %1$s of %2$s', 'hole-in-one-migration' ), HOLEMI_Util::size( $have ), HOLEMI_Util::size( $up['size'] ) );
 		if ( $have >= $up['size'] ) {
 			if ( $have > $up['size'] ) {
 				$fp = fopen( $part, 'c+b' ); // phpcs:ignore
@@ -181,7 +202,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 				fclose( $fp );
 			}
 			if ( ! @rename( $part, $job->state['archive'] ) ) { // phpcs:ignore
-				throw new HIO_Exception( esc_html__( 'Could not finish the upload.', 'hole-in-one-migration' ) );
+				throw new HOLEMI_Exception( esc_html__( 'Could not finish the upload.', 'hole-in-one-migration' ) );
 			}
 			$job->state['phase']   = 'validate';
 			$job->state['message'] = __( 'Upload complete. Checking the archive…', 'hole-in-one-migration' );
@@ -198,10 +219,10 @@ class HIO_Importer implements HIO_Tar_Handler {
 	/**
 	 * Do as much work as possible within the step budget.
 	 *
-	 * @param HIO_Job $job Job.
-	 * @throws HIO_Exception On error.
+	 * @param HOLEMI_Job $job Job.
+	 * @throws HOLEMI_Exception On error.
 	 */
-	public static function step( HIO_Job $job ) {
+	public static function step( HOLEMI_Job $job ) {
 		$imp      = new self();
 		$imp->job = $job;
 		while ( ! $job->should_stop() && 'done' !== $job->state['phase'] ) {
@@ -224,6 +245,12 @@ class HIO_Importer implements HIO_Tar_Handler {
 				case 'replace':
 					$imp->replace();
 					break;
+				case 'install_files':
+					$imp->install_files();
+					if ( 'install_files' !== $job->state['phase'] ) {
+						return; // Checkpoint with all files in place; the swap runs in a request of its own.
+					}
+					break;
 				case 'swap':
 					$imp->swap();
 					return;
@@ -231,7 +258,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 					$imp->finish_files_only();
 					return;
 				default:
-					throw new HIO_Exception( esc_html( 'Unknown phase.' ) );
+					throw new HOLEMI_Exception( esc_html( 'Unknown phase.' ) );
 			}
 		}
 	}
@@ -243,7 +270,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 	/**
 	 * Detect format, read the manifest, check compatibility.
 	 *
-	 * @throws HIO_Exception On an invalid archive.
+	 * @throws HOLEMI_Exception On an invalid archive.
 	 */
 	private function validate() {
 		$job  = $this->job;
@@ -251,7 +278,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 		$path = $s['archive'];
 		$fp   = @fopen( $path, 'rb' ); // phpcs:ignore
 		if ( ! $fp ) {
-			throw new HIO_Exception( esc_html__( 'Could not open the archive.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'Could not open the archive.', 'hole-in-one-migration' ) );
 		}
 		$magic = fread( $fp, 4 );
 		fclose( $fp );
@@ -261,31 +288,31 @@ class HIO_Importer implements HIO_Tar_Handler {
 			$manifest    = $this->read_tar_manifest( $path );
 		} elseif ( "PK\x03\x04" === $magic ) {
 			$s['format'] = 'zip';
-			$info        = HIO_Zip_Reader::build_index( $path, $job->path( 'zipindex.jsonl' ) );
+			$info        = HOLEMI_Zip_Reader::build_index( $path, $job->path( 'zipindex.jsonl' ) );
 			$s['zip']    = $info;
 			$manifest    = null;
 			$ih          = fopen( $job->path( 'zipindex.jsonl' ), 'rb' ); // phpcs:ignore
 			while ( false !== ( $line = fgets( $ih ) ) ) { // phpcs:ignore
 				$e = json_decode( $line, true );
 				if ( 'hio-manifest.json' === base64_decode( $e['n'] ) ) { // phpcs:ignore
-					$manifest = json_decode( HIO_Zip_Reader::read_entry( $path, $e ), true );
+					$manifest = json_decode( HOLEMI_Zip_Reader::read_entry( $path, $e ), true );
 					break;
 				}
 			}
 			fclose( $ih );
 		} else {
-			throw new HIO_Exception( esc_html__( 'This is not a .tar.gz or .zip file.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'This is not a .tar.gz or .zip file.', 'hole-in-one-migration' ) );
 		}
 
 		// Archive format id. It stayed 'holeinone-migration' when the plugin slug changed in 1.0.3.
 		if ( ! is_array( $manifest ) || ! in_array( $manifest['generator'] ?? '', array( 'holeinone-migration', 'hole-in-one-migration' ), true ) ) {
-			throw new HIO_Exception( esc_html__( 'This archive was not created by Hole-in-One Migration (no manifest found). Please export the old site with this plugin first.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'This archive was not created by Hole-in-One Migration (no manifest found). Please export the old site with this plugin first.', 'hole-in-one-migration' ) );
 		}
-		if ( (int) $manifest['format_version'] > HIO_FORMAT_VERSION ) {
-			throw new HIO_Exception( esc_html__( 'This archive was made with a newer version of Hole-in-One Migration. Please update the plugin on this site first.', 'hole-in-one-migration' ) );
+		if ( (int) $manifest['format_version'] > HOLEMI_FORMAT_VERSION ) {
+			throw new HOLEMI_Exception( esc_html__( 'This archive was made with a newer version of Hole-in-One Migration. Please update the plugin on this site first.', 'hole-in-one-migration' ) );
 		}
 		if ( ! empty( $manifest['multisite'] ) ) {
-			throw new HIO_Exception( esc_html__( 'Archives of WordPress Multisite networks are not supported.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'Archives of WordPress Multisite networks are not supported.', 'hole-in-one-migration' ) );
 		}
 
 		// Archives of version 1.0.1 and older may carry an address that a plugin
@@ -306,10 +333,10 @@ class HIO_Importer implements HIO_Tar_Handler {
 		if ( version_compare( PHP_VERSION, $manifest['php_version'], '<' ) ) {
 			$job->log( sprintf( 'This server runs PHP %s, the old one ran %s. Some plugins may need the newer PHP version.', PHP_VERSION, $manifest['php_version'] ), 'warning' );
 		}
-		$free = HIO_Util::free_space( WP_CONTENT_DIR );
+		$free = HOLEMI_Util::free_space( HOLEMI_Util::content_dir() );
 		$need = (float) ( $manifest['bytes'] ?? 0 );
 		if ( null !== $free && $need > 0 && $free < $need ) {
-			$job->log( sprintf( 'Low disk space: %1$s free, the site files need up to %2$s.', HIO_Util::size( $free ), HIO_Util::size( $need ) ), 'warning' );
+			$job->log( sprintf( 'Low disk space: %1$s free, the site files need up to %2$s.', HOLEMI_Util::size( $free ), HOLEMI_Util::size( $need ) ), 'warning' );
 		}
 
 		$s['ex']    = array(
@@ -321,11 +348,9 @@ class HIO_Importer implements HIO_Tar_Handler {
 			'idx'    => 0,
 			'cur'    => null,
 		);
-		$s['phase'] = 'extract';
+		$s['roots']   = self::source_roots( $manifest );
+		$s['phase']   = 'extract';
 		$s['message'] = __( 'Extracting files…', 'hole-in-one-migration' );
-		if ( 'db' !== $manifest['contents'] ) {
-			self::install_guard( $s['target']['plugin'], $job );
-		}
 		$s['progress'] = 11;
 	}
 
@@ -356,68 +381,134 @@ class HIO_Importer implements HIO_Tar_Handler {
 	 * ------------------------------------------------------------------ */
 
 	/**
-	 * Map an archive entry name to a destination path, or null to skip.
+	 * Archive folder of each role in this archive, longest first.
+	 *
+	 * @param array $m Manifest.
+	 * @return string[] role => archive folder.
+	 */
+	private static function source_roots( array $m ) {
+		$roots = self::DEFAULT_ROOTS;
+		// Before 1.1.0 an uploads folder with another name inside wp-content
+		// was stored under that name.
+		if ( ! empty( $m['uploads_dir'] ) && ! empty( $m['content_dir'] ) && HOLEMI_Util::inside( $m['uploads_dir'], $m['content_dir'] ) && $m['uploads_dir'] !== $m['content_dir'] ) {
+			$roots['uploads'] = 'wp-content' . substr( untrailingslashit( $m['uploads_dir'] ), strlen( untrailingslashit( $m['content_dir'] ) ) );
+		}
+		if ( ! empty( $m['roots'] ) && is_array( $m['roots'] ) ) {
+			foreach ( $m['roots'] as $role => $folder ) {
+				if ( isset( $roots[ $role ] ) && is_string( $folder ) && '' !== $folder ) {
+					$roots[ $role ] = trim( str_replace( '\\', '/', $folder ), '/' );
+				}
+			}
+		}
+		uasort(
+			$roots,
+			function ( $a, $b ) {
+				return strlen( $b ) - strlen( $a );
+			}
+		);
+		return $roots;
+	}
+
+	/**
+	 * Split an archive entry name into the role of its folder and the path
+	 * inside that folder, or null when it is not a site file.
+	 *
+	 * @param string $name Entry name.
+	 * @return array|null [ role, path ]
+	 */
+	private function split_entry( $name ) {
+		$name = trim( preg_replace( '#^\./#', '', str_replace( '\\', '/', $name ) ), '/' );
+		if ( false !== strpos( $name, "\0" ) ) {
+			return null;
+		}
+		$role = null;
+		$rest = '';
+		foreach ( $this->job->state['roots'] as $r => $folder ) {
+			if ( $name === $folder ) {
+				return null; // The role folder itself always exists.
+			}
+			if ( 0 === strpos( $name, $folder . '/' ) ) {
+				$role = $r;
+				$rest = substr( $name, strlen( $folder ) + 1 );
+				break;
+			}
+		}
+		if ( null === $role ) {
+			if ( 0 !== strpos( $name, 'wp-content/' ) ) {
+				return null;
+			}
+			$role = 'content';
+			$rest = substr( $name, 11 );
+		}
+		if ( '' === $rest ) {
+			return null;
+		}
+		foreach ( explode( '/', $rest ) as $part ) {
+			if ( '' === $part || '.' === $part || '..' === $part ) {
+				return null; // No path tricks: stay inside the folder.
+			}
+		}
+		return array( $role, $rest );
+	}
+
+	/**
+	 * Map an archive entry name to the path it is extracted to, or null to
+	 * skip it. Site files never go into the live site directly: they are
+	 * extracted into files/<role>/ in the job folder and moved into place by
+	 * install_files(). Files that WordPress loads on every request go into
+	 * staged/ and are put in place after the database swap.
 	 *
 	 * @param string $name Entry name.
 	 * @return string|null
 	 */
 	private function map_entry( $name ) {
-		$name = str_replace( '\\', '/', $name );
-		if ( false !== strpos( $name, "\0" ) ) {
-			return null;
-		}
-		$name = preg_replace( '#^\./#', '', $name );
-		if ( 'hio-database.sql' === $name ) {
+		if ( 'hio-database.sql' === trim( preg_replace( '#^\./#', '', $name ), '/' ) ) {
 			return $this->job->path( 'database.sql' );
 		}
-		if ( 0 !== strpos( $name, 'wp-content/' ) ) {
+		$m = $this->job->state['manifest'];
+		if ( 'db' === $m['contents'] ) {
 			return null;
 		}
-		$rel = trim( substr( $name, 11 ), '/' );
-		if ( '' === $rel ) {
+		$split = $this->split_entry( $name );
+		if ( null === $split ) {
 			return null;
 		}
-		foreach ( explode( '/', $rel ) as $part ) {
-			if ( '' === $part || '.' === $part || '..' === $part ) {
-				return null;
-			}
-		}
-		$t    = $this->job->state['target'];
-		$m    = $this->job->state['manifest'];
+		list( $role, $rest ) = $split;
+		$rel  = 'content' === $role ? $rest : $role . '/' . $rest;
+		$top  = explode( '/', $rest )[0];
 		$skip = array(
-			HIO_Storage::rel(),
-			'plugins/' . dirname( $t['plugin'] ),
+			'plugins/' . basename( $this->job->state['target']['plugin_dir'] ),
 			'plugins/' . ( $m['plugin_dir'] ?? 'holeinone-migration' ),
 			'plugins/holeinone-migration', // Copies of this plugin under its pre-1.0.3 name.
 			'plugins/hole-in-one-migration',
-			'mu-plugins/' . self::GUARD_FILE,
+			'mu-plugins/0000-hio-import-guard.php', // Leftover of versions before 1.1.0.
 		);
 		foreach ( $skip as $sk ) {
 			if ( $rel === $sk || 0 === strpos( $rel, $sk . '/' ) ) {
 				return null;
 			}
 		}
-		if ( 'db' === $m['contents'] ) {
+		if ( 'content' === $role && HOLEMI_Storage::is_storage_name( $top ) ) {
 			return null;
 		}
 		if ( self::autoloaded( $rel ) ) {
 			// WordPress runs these on every request, also on this import's own
-			// requests. A half-extracted one (or a loader whose folder is not
-			// extracted yet, or one that changes the site address and so logs
-			// the user out) would break the import. They are put in place only
-			// after the database switch, see install_staged().
-			$this->job->state['staged'][ $rel ] = 1;
+			// requests. A loader whose folder is not in place yet, or one that
+			// changes the site address and so logs the user out, would break the
+			// import. They are put in place only after the database switch, see
+			// install_staged().
+			$this->job->state['staged'][ $rel ] = array( $role, $rest );
 			return $this->job->path( 'staged/' . $rel );
 		}
-		return rtrim( WP_CONTENT_DIR, '/\\' ) . '/' . $rel;
+		return $this->job->path( 'files/' . $role . '/' . $rest );
 	}
 
 	/**
-	 * Is this wp-content file loaded by WordPress on every request?
-	 * Must-use plugins in the folder root, and drop-ins that load without
-	 * any setting in wp-config.php.
+	 * Is this file loaded by WordPress on every request? Must-use plugins in
+	 * the folder root, and drop-ins that load without any setting in
+	 * wp-config.php.
 	 *
-	 * @param string $rel Path relative to wp-content.
+	 * @param string $rel Path relative to wp-content, with role folders under their role name.
 	 * @return bool
 	 */
 	private static function autoloaded( $rel ) {
@@ -426,6 +517,17 @@ class HIO_Importer implements HIO_Tar_Handler {
 			return true;
 		}
 		return in_array( $rel, array( 'object-cache.php', 'db.php', 'advanced-cache.php', 'fatal-error-handler.php', 'sunrise.php' ), true );
+	}
+
+	/**
+	 * Live path of a role folder on this site.
+	 *
+	 * @param string $role Role.
+	 * @return string
+	 */
+	private function target_dir( $role ) {
+		$dirs = $this->job->state['target']['dirs'];
+		return isset( $dirs[ $role ] ) ? $dirs[ $role ] : $dirs['content'];
 	}
 
 	/**
@@ -442,16 +544,16 @@ class HIO_Importer implements HIO_Tar_Handler {
 		}
 		$old_host = (string) wp_parse_url( (string) $s['manifest']['home'], PHP_URL_HOST );
 		$moved    = untrailingslashit( (string) $s['manifest']['home'] ) !== untrailingslashit( (string) $s['target']['home'] );
-		foreach ( array_keys( $s['staged'] ) as $rel ) {
+		foreach ( $s['staged'] as $rel => $where ) {
 			$src = $job->path( 'staged/' . $rel );
-			$dst = rtrim( WP_CONTENT_DIR, '/\\' ) . '/' . $rel;
+			$dst = $this->target_dir( $where[0] ) . '/' . $where[1];
 			if ( ! is_file( $src ) ) {
 				unset( $s['staged'][ $rel ] );
 				continue;
 			}
-			$code = (string) file_get_contents( $src ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+			$code = (string) HOLEMI_Util::read_file( $src );
 			if ( $moved && '' !== $old_host && preg_match( '/define\s*\(\s*[\'"]WP_(HOME|SITEURL)[\'"]/i', $code ) && false !== stripos( $code, $old_host ) ) {
-				$job->log( sprintf( 'Left out wp-content/%s: it hard-codes the old site address (WP_HOME / WP_SITEURL), which would send visitors and logins back to the old site. It is usually a leftover of another migration tool.', $rel ), 'warning' );
+				$job->log( sprintf( 'Left out %s: it hard-codes the old site address (WP_HOME / WP_SITEURL), which would send visitors and logins back to the old site. It is usually a leftover of another migration tool.', $rel ), 'warning' );
 				@unlink( $src ); // phpcs:ignore
 				unset( $s['staged'][ $rel ] );
 				continue;
@@ -460,7 +562,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 				wp_mkdir_p( dirname( $dst ) );
 			}
 			if ( ! @rename( $src, $dst ) && ! ( @copy( $src, $dst ) && @unlink( $src ) ) ) { // phpcs:ignore
-				$job->log( 'Could not install wp-content/' . $rel . ' (check permissions).', 'warning' );
+				$job->log( 'Could not install ' . $rel . ' (check permissions).', 'warning' );
 			}
 			unset( $s['staged'][ $rel ] );
 		}
@@ -537,7 +639,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 	 */
 	public function entry_data( $data ) {
 		if ( $this->out_fp ) {
-			HIO_Util::fwrite_all( $this->out_fp, $data );
+			HOLEMI_Util::fwrite_all( $this->out_fp, $data );
 		}
 		$this->job->state['ex']['out']['written'] += strlen( $data );
 		$this->job->state['ex']['bytes']          += strlen( $data );
@@ -583,7 +685,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 	/**
 	 * Extract a .tar.gz, one gzip member at a time.
 	 *
-	 * @throws HIO_Exception On a damaged archive.
+	 * @throws HOLEMI_Exception On a damaged archive.
 	 */
 	private function extract_tar() {
 		$job  = $this->job;
@@ -594,7 +696,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 		$fp   = fopen( $path, 'rb' ); // phpcs:ignore
 
 		// Work on a copy of the checkpoint; commit it only at member boundaries.
-		$parser = new HIO_Tar_Parser( $this, $ex['parser'] );
+		$parser = new HOLEMI_Tar_Parser( $this, $ex['parser'] );
 		$this->resume_out();
 		$read = $job->scaled( 1048576, 65536 );
 
@@ -606,11 +708,11 @@ class HIO_Importer implements HIO_Tar_Handler {
 				while ( ! $end ) {
 					$chunk = fread( $fp, $read );
 					if ( false === $chunk || '' === $chunk ) {
-						throw new HIO_Exception( esc_html__( 'The archive is incomplete (unexpected end of file). Please upload it again.', 'hole-in-one-migration' ) );
+						throw new HOLEMI_Exception( esc_html__( 'The archive is incomplete (unexpected end of file). Please upload it again.', 'hole-in-one-migration' ) );
 					}
 					$out = @inflate_add( $ctx, $chunk, ZLIB_SYNC_FLUSH ); // phpcs:ignore
 					if ( false === $out ) {
-						throw new HIO_Exception( esc_html__( 'The archive is damaged (decompression failed). Please upload it again.', 'hole-in-one-migration' ) );
+						throw new HOLEMI_Exception( esc_html__( 'The archive is damaged (decompression failed). Please upload it again.', 'hole-in-one-migration' ) );
 					}
 					if ( '' !== $out ) {
 						$parser->feed( $out );
@@ -630,11 +732,11 @@ class HIO_Importer implements HIO_Tar_Handler {
 
 		$s['progress'] = 11 + (int) ( 49 * min( 1, $ex['coff'] / max( 1, $size ) ) );
 		/* translators: 1: number of files, 2: total size. */
-		$s['message']  = sprintf( __( 'Extracting: %1$s files, %2$s', 'hole-in-one-migration' ), HIO_Util::num( $ex['files'] ), HIO_Util::size( $ex['bytes'] ) );
+		$s['message']  = sprintf( __( 'Extracting: %1$s files, %2$s', 'hole-in-one-migration' ), HOLEMI_Util::num( $ex['files'] ), HOLEMI_Util::size( $ex['bytes'] ) );
 
 		if ( $parser->ended() || $ex['coff'] >= $size ) {
 			if ( ! $parser->ended() ) {
-				throw new HIO_Exception( esc_html__( 'The archive is incomplete (end marker missing). Please create and upload it again.', 'hole-in-one-migration' ) );
+				throw new HOLEMI_Exception( esc_html__( 'The archive is incomplete (end marker missing). Please create and upload it again.', 'hole-in-one-migration' ) );
 			}
 			$this->extract_done();
 		}
@@ -643,7 +745,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 	/**
 	 * Extract a .zip entry by entry.
 	 *
-	 * @throws HIO_Exception On a damaged archive.
+	 * @throws HOLEMI_Exception On a damaged archive.
 	 */
 	private function extract_zip() {
 		$job   = $this->job;
@@ -664,16 +766,16 @@ class HIO_Importer implements HIO_Tar_Handler {
 					while ( $cur['done'] < $cur['u'] && ! $job->should_stop() ) {
 						$buf = fread( $fp, (int) min( $chunk, $cur['u'] - $cur['done'] ) );
 						if ( false === $buf || '' === $buf ) {
-							throw new HIO_Exception( esc_html__( 'The archive is incomplete (unexpected end of file).', 'hole-in-one-migration' ) );
+							throw new HOLEMI_Exception( esc_html__( 'The archive is incomplete (unexpected end of file).', 'hole-in-one-migration' ) );
 						}
 						$this->entry_data( $buf );
-						$cur['crc']  = HIO_Util::crc32_combine( $cur['crc'], crc32( $buf ), strlen( $buf ) );
+						$cur['crc']  = HOLEMI_Util::crc32_combine( $cur['crc'], crc32( $buf ), strlen( $buf ) );
 						$cur['done'] += strlen( $buf );
 					}
 					if ( $cur['done'] >= $cur['u'] ) {
 						if ( ( $cur['crc'] & 0xFFFFFFFF ) !== ( $cur['crc_want'] & 0xFFFFFFFF ) ) {
 							/* translators: %s: file name inside the archive. */
-							throw new HIO_Exception( esc_html( sprintf( __( 'Checksum error in %s. The archive is damaged; please upload it again.', 'hole-in-one-migration' ), $cur['name'] ) ) );
+							throw new HOLEMI_Exception( esc_html( sprintf( __( 'Checksum error in %s. The archive is damaged; please upload it again.', 'hole-in-one-migration' ), $cur['name'] ) ) );
 						}
 						$this->entry_end();
 						$ex['cur'] = null;
@@ -703,7 +805,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 					}
 					continue;
 				}
-				$data_off = HIO_Zip_Reader::data_offset( $fp, $e['o'] );
+				$data_off = HOLEMI_Zip_Reader::data_offset( $fp, $e['o'] );
 				$this->open_out( $dest, 0, 0, $name );
 
 				if ( 0 === (int) $e['m'] && $e['u'] > self::SMALL_ENTRY ) {
@@ -733,14 +835,14 @@ class HIO_Importer implements HIO_Tar_Handler {
 				while ( $left > 0 ) {
 					$buf = fread( $fp, (int) min( 1048576, $left ) );
 					if ( false === $buf || '' === $buf ) {
-						throw new HIO_Exception( esc_html__( 'The archive is incomplete (unexpected end of file).', 'hole-in-one-migration' ) );
+						throw new HOLEMI_Exception( esc_html__( 'The archive is incomplete (unexpected end of file).', 'hole-in-one-migration' ) );
 					}
 					$left -= strlen( $buf );
 					if ( $ctx ) {
 						$buf = inflate_add( $ctx, $buf, $left > 0 ? ZLIB_SYNC_FLUSH : ZLIB_FINISH );
 						if ( false === $buf ) {
 							/* translators: %s: file name inside the archive. */
-							throw new HIO_Exception( esc_html( sprintf( __( 'Decompression failed for %s. The archive is damaged.', 'hole-in-one-migration' ), $name ) ) );
+							throw new HOLEMI_Exception( esc_html( sprintf( __( 'Decompression failed for %s. The archive is damaged.', 'hole-in-one-migration' ), $name ) ) );
 						}
 					}
 					hash_update( $hc, $buf );
@@ -748,7 +850,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 				}
 				if ( hexdec( hash_final( $hc ) ) !== $e['crc'] ) {
 					/* translators: %s: file name inside the archive. */
-					throw new HIO_Exception( esc_html( sprintf( __( 'Checksum error in %s. The archive is damaged; please upload it again.', 'hole-in-one-migration' ), $name ) ) );
+					throw new HOLEMI_Exception( esc_html( sprintf( __( 'Checksum error in %s. The archive is damaged; please upload it again.', 'hole-in-one-migration' ), $name ) ) );
 				}
 				$this->entry_end();
 			}
@@ -761,7 +863,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 		$total         = max( 1, (float) ( $s['zip']['bytes'] ?? 1 ) );
 		$s['progress'] = 11 + (int) ( 49 * min( 1, $ex['bytes'] / $total ) );
 		/* translators: 1: number of files, 2: total size. */
-		$s['message']  = sprintf( __( 'Extracting: %1$s files, %2$s', 'hole-in-one-migration' ), HIO_Util::num( $ex['files'] ), HIO_Util::size( $ex['bytes'] ) );
+		$s['message']  = sprintf( __( 'Extracting: %1$s files, %2$s', 'hole-in-one-migration' ), HOLEMI_Util::num( $ex['files'] ), HOLEMI_Util::size( $ex['bytes'] ) );
 		if ( $done ) {
 			$this->extract_done();
 		}
@@ -774,11 +876,12 @@ class HIO_Importer implements HIO_Tar_Handler {
 		$s = &$this->job->state;
 		$this->job->log( sprintf( 'Extraction complete: %d files written.', $s['ex']['files'] ) );
 		if ( 'files' === $s['manifest']['contents'] ) {
-			$s['phase'] = 'finish_files';
+			$s['phase']   = 'install_files';
+			$s['message'] = __( 'Moving the files into place…', 'hole-in-one-migration' );
 			return;
 		}
 		if ( ! is_file( $this->job->path( 'database.sql' ) ) ) {
-			throw new HIO_Exception( esc_html__( 'The archive does not contain a database.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'The archive does not contain a database.', 'hole-in-one-migration' ) );
 		}
 		$s['phase']   = 'db_import';
 		$s['message'] = __( 'Importing database…', 'hole-in-one-migration' );
@@ -802,22 +905,22 @@ class HIO_Importer implements HIO_Tar_Handler {
 			if ( 0 === strpos( $p, $target ) || 0 === strpos( $target, $p ) ) {
 				continue;
 			}
-			if ( ! HIO_DB::tables_with_prefix( $p ) ) {
+			if ( ! HOLEMI_DB::tables_with_prefix( $p ) ) {
 				return $p;
 			}
 		}
-		throw new HIO_Exception( esc_html( 'Could not find a free temporary table prefix.' ) );
+		throw new HOLEMI_Exception( esc_html( 'Could not find a free temporary table prefix.' ) );
 	}
 
 	/**
 	 * Set safe session variables for the import.
 	 */
 	private function db_session() {
-		HIO_DB::exec( "SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'" );
-		HIO_DB::exec( 'SET SESSION foreign_key_checks = 0' );
+		HOLEMI_DB::exec( "SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'" );
+		HOLEMI_DB::exec( 'SET SESSION foreign_key_checks = 0' );
 		try {
-			HIO_DB::exec( 'SET NAMES utf8mb4' );
-		} catch ( HIO_Exception $e ) {
+			HOLEMI_DB::exec( 'SET NAMES utf8mb4' );
+		} catch ( HOLEMI_Exception $e ) {
 			// Very old MySQL without utf8mb4: keep the WordPress default.
 			unset( $e );
 		}
@@ -830,11 +933,11 @@ class HIO_Importer implements HIO_Tar_Handler {
 	 */
 	private function server_caps() {
 		$coll = array();
-		foreach ( HIO_DB::rows( 'SHOW COLLATION' ) as $r ) {
+		foreach ( HOLEMI_DB::rows( 'SHOW COLLATION' ) as $r ) {
 			$coll[ strtolower( $r[0] ) ] = true;
 		}
 		$eng = array();
-		foreach ( HIO_DB::rows( 'SHOW ENGINES', true ) as $r ) {
+		foreach ( HOLEMI_DB::rows( 'SHOW ENGINES', true ) as $r ) {
 			if ( in_array( strtoupper( $r['Support'] ), array( 'YES', 'DEFAULT' ), true ) ) {
 				$eng[ strtolower( $r['Engine'] ) ] = true;
 			}
@@ -888,7 +991,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 	/**
 	 * Execute the dump statement by statement.
 	 *
-	 * @throws HIO_Exception On a failing statement.
+	 * @throws HOLEMI_Exception On a failing statement.
 	 */
 	private function db_import() {
 		$job  = $this->job;
@@ -906,7 +1009,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 		}
 		$d   = &$s['dbi'];
 		$tmp = $d['tmp'];
-		$tok = '`' . HIO_Exporter::PREFIX_TOKEN;
+		$tok = '`' . HOLEMI_Exporter::PREFIX_TOKEN;
 		$this->db_session();
 		list( $coll, $eng ) = $this->server_caps();
 
@@ -930,7 +1033,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 				continue;
 			}
 			if ( ';' !== substr( $sql, -1 ) ) {
-				throw new HIO_Exception( esc_html__( 'The database dump in the archive is incomplete. Please export the old site again.', 'hole-in-one-migration' ) );
+				throw new HOLEMI_Exception( esc_html__( 'The database dump in the archive is incomplete. Please export the old site again.', 'hole-in-one-migration' ) );
 			}
 			if ( 0 === strpos( $sql, 'INSERT INTO ' . $tok ) ) {
 				// REPLACE makes re-running a statement after a crash harmless.
@@ -940,7 +1043,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 			} elseif ( 0 === strpos( $sql, 'CREATE TABLE ' ) ) {
 				$sql = $this->fix_create( str_replace( $tok, '`' . $tmp, $sql ), $coll, $eng );
 				if ( preg_match( '/^CREATE TABLE `([^`]+)`/', $sql, $m ) && strlen( $m[1] ) > 64 ) {
-					throw new HIO_Exception( esc_html( sprintf( 'Table name too long: %s', $m[1] ) ) );
+					throw new HOLEMI_Exception( esc_html( sprintf( 'Table name too long: %s', $m[1] ) ) );
 				}
 			} else {
 				$job->log( 'Unknown statement in dump skipped: ' . substr( $sql, 0, 80 ), 'warning' );
@@ -948,15 +1051,15 @@ class HIO_Importer implements HIO_Tar_Handler {
 				continue;
 			}
 			try {
-				HIO_DB::exec( $sql );
-			} catch ( HIO_Exception $e ) {
-				$msg = HIO_Util::plain( $e );
+				HOLEMI_DB::exec( $sql );
+			} catch ( HOLEMI_Exception $e ) {
+				$msg = HOLEMI_Util::plain( $e );
 				if ( false !== stripos( $msg, 'max_allowed_packet' ) || false !== stripos( $msg, 'gone away' ) ) {
 					$msg .= ' ' . __( '(The database server rejected a large statement. Ask your host to raise max_allowed_packet to 16M or more.)', 'hole-in-one-migration' );
 				}
 				fclose( $fp );
 				/* translators: 1: database error message, 2: start of the failed SQL statement. */
-				throw new HIO_Exception( esc_html( sprintf( __( 'Database import failed: %1$s — statement: %2$s', 'hole-in-one-migration' ), $msg, substr( $sql, 0, 300 ) ) ) );
+				throw new HOLEMI_Exception( esc_html( sprintf( __( 'Database import failed: %1$s — statement: %2$s', 'hole-in-one-migration' ), $msg, substr( $sql, 0, 300 ) ) ) );
 			}
 			$d['off'] = $next;
 			$d['stmts']++;
@@ -969,7 +1072,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 
 		$s['progress'] = 60 + (int) ( 25 * min( 1, $d['off'] / max( 1, $d['size'] ) ) );
 		/* translators: 1: size done, 2: total size. */
-		$s['message']  = sprintf( __( 'Importing database: %1$s of %2$s', 'hole-in-one-migration' ), HIO_Util::size( $d['off'] ), HIO_Util::size( $d['size'] ) );
+		$s['message']  = sprintf( __( 'Importing database: %1$s of %2$s', 'hole-in-one-migration' ), HOLEMI_Util::size( $d['off'] ), HOLEMI_Util::size( $d['size'] ) );
 		if ( $finished ) {
 			$job->log( sprintf( 'Database import complete: %d statements.', $d['stmts'] ) );
 			$s['phase'] = 'replace';
@@ -983,7 +1086,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 	/**
 	 * Build the replacement map from old site to this site.
 	 *
-	 * @return HIO_Search_Replace
+	 * @return HOLEMI_Search_Replace
 	 */
 	private function engine() {
 		$m    = $this->job->state['manifest'];
@@ -1011,12 +1114,20 @@ class HIO_Importer implements HIO_Tar_Handler {
 			}
 		}
 		$paths = array();
-		foreach ( array( 'uploads_dir', 'content_dir', 'abspath' ) as $k ) {
+		$t_dirs = $t['dirs'];
+		foreach ( array(
+			'uploads_dir'    => $t['uploads_dir'],
+			'plugins_dir'    => $t_dirs['plugins'],
+			'mu_plugins_dir' => $t_dirs['mu-plugins'],
+			'themes_dir'     => $t_dirs['themes'],
+			'content_dir'    => $t['content_dir'],
+			'abspath'        => $t['abspath'],
+		) as $k => $new ) {
 			if ( ! empty( $m[ $k ] ) && ! isset( $paths[ $m[ $k ] ] ) ) {
-				$paths[ $m[ $k ] ] = $t[ $k ];
+				$paths[ $m[ $k ] ] = $new;
 			}
 		}
-		return new HIO_Search_Replace( HIO_Search_Replace::build_map( $urls, $paths ) );
+		return new HOLEMI_Search_Replace( HOLEMI_Search_Replace::build_map( $urls, $paths ) );
 	}
 
 	/**
@@ -1031,23 +1142,23 @@ class HIO_Importer implements HIO_Tar_Handler {
 		if ( ! isset( $s['rep'] ) ) {
 			$tables = array();
 			$status = array();
-			foreach ( HIO_DB::rows( 'SHOW TABLE STATUS', true ) as $st ) {
+			foreach ( HOLEMI_DB::rows( 'SHOW TABLE STATUS', true ) as $st ) {
 				$status[ $st['Name'] ] = $st;
 			}
-			foreach ( HIO_DB::tables_with_prefix( $tmp ) as $t ) {
+			foreach ( HOLEMI_DB::tables_with_prefix( $tmp ) as $t ) {
 				$cols  = array();
 				$types = array();
-				foreach ( HIO_DB::columns( $t ) as $c ) {
+				foreach ( HOLEMI_DB::columns( $t ) as $c ) {
 					$types[ $c['name'] ] = $c['type'];
 					if ( ! $c['generated'] && preg_match( '/char|text|blob/', $c['type'] ) ) {
 						$cols[] = $c['name'];
 					}
 				}
-				$pk       = HIO_DB::primary_key( $t );
+				$pk       = HOLEMI_DB::primary_key( $t );
 				// Key range of numeric keys, only used to show real progress.
 				$range = null;
 				if ( $pk && $cols && preg_match( '/int/', $types[ $pk[0] ] ) ) {
-					$mm    = HIO_DB::rows( 'SELECT MIN(' . HIO_Util::ident( $pk[0] ) . '), MAX(' . HIO_Util::ident( $pk[0] ) . ') FROM ' . HIO_Util::ident( $t ) );
+					$mm    = HOLEMI_DB::rows( 'SELECT MIN(' . HOLEMI_Util::ident( $pk[0] ) . '), MAX(' . HOLEMI_Util::ident( $pk[0] ) . ') FROM ' . HOLEMI_Util::ident( $t ) );
 					$range = isset( $mm[0][1] ) ? array( (float) $mm[0][0], (float) $mm[0][1] ) : null;
 				}
 				$avg      = isset( $status[ $t ]['Avg_row_length'] ) ? (int) $status[ $t ]['Avg_row_length'] : 0;
@@ -1086,31 +1197,31 @@ class HIO_Importer implements HIO_Tar_Handler {
 				$this->next_table( $r );
 				continue;
 			}
-			$q = HIO_Util::ident( $t['name'] );
+			$q = HOLEMI_Util::ident( $t['name'] );
 
 			if ( empty( $t['pk'] ) ) {
 				// No primary key: plain SQL REPLACE (rare, e.g. some log tables).
 				foreach ( $t['cols'] as $c ) {
-					$expr = HIO_Util::ident( $c );
+					$expr = HOLEMI_Util::ident( $c );
 					foreach ( $sr->map() as $from => $to ) {
-						$expr = 'REPLACE(' . $expr . ',' . HIO_DB::quote( $from ) . ',' . HIO_DB::quote( $to ) . ')';
+						$expr = 'REPLACE(' . $expr . ',' . HOLEMI_DB::quote( $from ) . ',' . HOLEMI_DB::quote( $to ) . ')';
 					}
-					HIO_DB::exec( 'UPDATE ' . $q . ' SET ' . HIO_Util::ident( $c ) . ' = ' . $expr );
+					HOLEMI_DB::exec( 'UPDATE ' . $q . ' SET ' . HOLEMI_Util::ident( $c ) . ' = ' . $expr );
 				}
 				$this->next_table( $r );
 				continue;
 			}
 
-			$pk_cols = array_map( array( 'HIO_Util', 'ident' ), $t['pk'] );
+			$pk_cols = array_map( array( 'HOLEMI_Util', 'ident' ), $t['pk'] );
 			$order   = implode( ',', $pk_cols );
 			$batch   = $job->scaled( $t['batch'], 5 );
 			$window  = $job->scaled( 5000, 200 );
-			$after   = null !== $r['last'] ? HIO_DB::after( $t['pk'], (array) $r['last'] ) : '';
+			$after   = null !== $r['last'] ? HOLEMI_DB::after( $t['pk'], (array) $r['last'] ) : '';
 
 			// 1) End of the next window of rows in key order (index-only, cheap).
 			//    Bounding every query to a window keeps it fast even when few
 			//    rows match, so no single query can run into a timeout.
-			$upper = HIO_DB::rows( 'SELECT ' . $order . ' FROM ' . $q . ( $after ? ' WHERE ' . $after : '' ) . ' ORDER BY ' . $order . ' LIMIT ' . ( $window - 1 ) . ',1' );
+			$upper = HOLEMI_DB::rows( 'SELECT ' . $order . ' FROM ' . $q . ( $after ? ' WHERE ' . $after : '' ) . ' ORDER BY ' . $order . ' LIMIT ' . ( $window - 1 ) . ',1' );
 			$upper = $upper ? $upper[0] : null;
 
 			// 2) Rows in that window that contain an old address or path.
@@ -1119,26 +1230,26 @@ class HIO_Importer implements HIO_Tar_Handler {
 				$where[] = $after;
 			}
 			if ( null !== $upper ) {
-				$where[] = 'NOT ' . HIO_DB::after( $t['pk'], $upper );
+				$where[] = 'NOT ' . HOLEMI_DB::after( $t['pk'], $upper );
 			}
 			$likes = array();
 			foreach ( $t['cols'] as $c ) {
 				foreach ( $needles as $nd ) {
-					$likes[] = HIO_Util::ident( $c ) . " LIKE '%" . HIO_Util::like_escape( $nd ) . "%'";
+					$likes[] = HOLEMI_Util::ident( $c ) . " LIKE '%" . HOLEMI_Util::like_escape( $nd ) . "%'";
 				}
 			}
 			if ( $likes ) {
 				$where[] = '(' . implode( ' OR ', $likes ) . ')';
 			}
 			$sel  = array_unique( array_merge( $t['pk'], $t['cols'] ) );
-			$sql  = 'SELECT ' . implode( ',', array_map( array( 'HIO_Util', 'ident' ), $sel ) ) . ' FROM ' . $q;
+			$sql  = 'SELECT ' . implode( ',', array_map( array( 'HOLEMI_Util', 'ident' ), $sel ) ) . ' FROM ' . $q;
 			$sql .= $where ? ' WHERE ' . implode( ' AND ', $where ) : '';
 			$sql .= ' ORDER BY ' . $order . ' LIMIT ' . $batch;
 
-			$rows = HIO_DB::rows( $sql, true );
+			$rows = HOLEMI_DB::rows( $sql, true );
 			// One transaction per batch: one disk sync instead of one per row
 			// (often 10-50x faster on InnoDB). A crash rolls the batch back.
-			HIO_DB::exec( 'START TRANSACTION' );
+			HOLEMI_DB::exec( 'START TRANSACTION' );
 			foreach ( $rows as $row ) {
 				$set = array();
 				foreach ( $t['cols'] as $c ) {
@@ -1147,19 +1258,19 @@ class HIO_Importer implements HIO_Tar_Handler {
 					}
 					$new = $sr->run( $row[ $c ] );
 					if ( $new !== $row[ $c ] ) {
-						$set[] = HIO_Util::ident( $c ) . ' = ' . HIO_DB::quote( $new );
+						$set[] = HOLEMI_Util::ident( $c ) . ' = ' . HOLEMI_DB::quote( $new );
 					}
 				}
 				if ( $set ) {
 					$cond = array();
 					foreach ( $t['pk'] as $k ) {
-						$cond[] = HIO_Util::ident( $k ) . ' = ' . HIO_DB::quote( $row[ $k ] );
+						$cond[] = HOLEMI_Util::ident( $k ) . ' = ' . HOLEMI_DB::quote( $row[ $k ] );
 					}
-					HIO_DB::exec( 'UPDATE ' . $q . ' SET ' . implode( ', ', $set ) . ' WHERE ' . implode( ' AND ', $cond ) );
+					HOLEMI_DB::exec( 'UPDATE ' . $q . ' SET ' . implode( ', ', $set ) . ' WHERE ' . implode( ' AND ', $cond ) );
 					$r['rows']++;
 				}
 			}
-			HIO_DB::exec( 'COMMIT' );
+			HOLEMI_DB::exec( 'COMMIT' );
 			$n = count( $rows );
 			if ( $n >= $batch ) {
 				// More matches inside this window: continue after the last one.
@@ -1196,8 +1307,8 @@ class HIO_Importer implements HIO_Tar_Handler {
 		if ( $r['ti'] >= count( $r['tables'] ) ) {
 			$job->log( sprintf( 'Search & replace complete: %d rows updated.', $r['rows'] ) );
 			$this->fixups();
-			$s['phase']   = 'swap';
-			$s['message'] = __( 'Switching to the new database…', 'hole-in-one-migration' );
+			$s['phase']   = 'install_files';
+			$s['message'] = __( 'Moving the files into place…', 'hole-in-one-migration' );
 		}
 	}
 
@@ -1220,28 +1331,39 @@ class HIO_Importer implements HIO_Tar_Handler {
 		$tmp  = $s['dbi']['tmp'];
 		$src  = $s['manifest']['prefix'];
 		$dst  = $s['target']['prefix'];
-		$opt  = HIO_Util::ident( $tmp . 'options' );
-		$um   = HIO_Util::ident( $tmp . 'usermeta' );
+		$opt  = HOLEMI_Util::ident( $tmp . 'options' );
+		$um   = HOLEMI_Util::ident( $tmp . 'usermeta' );
 
-		if ( ! in_array( $tmp . 'options', HIO_DB::tables_with_prefix( $tmp ), true ) ) {
-			throw new HIO_Exception( esc_html__( 'The imported database has no options table. The archive does not look like a WordPress database.', 'hole-in-one-migration' ) );
+		if ( ! in_array( $tmp . 'options', HOLEMI_DB::tables_with_prefix( $tmp ), true ) ) {
+			throw new HOLEMI_Exception( esc_html__( 'The imported database has no options table. The archive does not look like a WordPress database.', 'hole-in-one-migration' ) );
 		}
 
 		// Table prefix changed: rename prefix-dependent keys.
 		if ( $src !== $dst ) {
-			if ( in_array( $tmp . 'usermeta', HIO_DB::tables_with_prefix( $tmp ), true ) ) {
-				HIO_DB::exec( 'UPDATE ' . $um . ' SET meta_key = CONCAT(' . HIO_DB::quote( $dst ) . ', SUBSTRING(meta_key, ' . ( strlen( $src ) + 1 ) . ")) WHERE meta_key LIKE '" . HIO_Util::like_escape( $src ) . "%'" );
+			if ( in_array( $tmp . 'usermeta', HOLEMI_DB::tables_with_prefix( $tmp ), true ) ) {
+				HOLEMI_DB::exec( 'UPDATE ' . $um . ' SET meta_key = CONCAT(' . HOLEMI_DB::quote( $dst ) . ', SUBSTRING(meta_key, ' . ( strlen( $src ) + 1 ) . ")) WHERE meta_key LIKE '" . HOLEMI_Util::like_escape( $src ) . "%'" );
 			}
-			HIO_DB::exec( 'DELETE FROM ' . $opt . ' WHERE option_name = ' . HIO_DB::quote( $dst . 'user_roles' ) );
-			HIO_DB::exec( 'UPDATE ' . $opt . ' SET option_name = ' . HIO_DB::quote( $dst . 'user_roles' ) . ' WHERE option_name = ' . HIO_DB::quote( $src . 'user_roles' ) );
+			HOLEMI_DB::exec( 'DELETE FROM ' . $opt . ' WHERE option_name = ' . HOLEMI_DB::quote( $dst . 'user_roles' ) );
+			HOLEMI_DB::exec( 'UPDATE ' . $opt . ' SET option_name = ' . HOLEMI_DB::quote( $dst . 'user_roles' ) . ' WHERE option_name = ' . HOLEMI_DB::quote( $src . 'user_roles' ) );
 			$this->job->log( sprintf( 'Table prefix changed from %s to %s; user roles and capabilities updated.', $src, $dst ) );
 		}
 
 		// This site's address and the plugin must stay intact.
-		HIO_DB::exec( 'UPDATE ' . $opt . ' SET option_value = ' . HIO_DB::quote( $s['target']['db_home'] ) . " WHERE option_name = 'home'" );
-		HIO_DB::exec( 'UPDATE ' . $opt . ' SET option_value = ' . HIO_DB::quote( $s['target']['db_siteurl'] ) . " WHERE option_name = 'siteurl'" );
+		HOLEMI_DB::exec( 'UPDATE ' . $opt . ' SET option_value = ' . HOLEMI_DB::quote( $s['target']['db_home'] ) . " WHERE option_name = 'home'" );
+		HOLEMI_DB::exec( 'UPDATE ' . $opt . ' SET option_value = ' . HOLEMI_DB::quote( $s['target']['db_siteurl'] ) . " WHERE option_name = 'siteurl'" );
 
-		$active  = HIO_DB::value( 'SELECT option_value FROM ' . $opt . " WHERE option_name = 'active_plugins'" );
+		// Media files were put into this site's uploads folder (see install_files()),
+		// so this site's upload settings must stay too.
+		foreach ( $s['target']['upload_opts'] as $name => $value ) {
+			$was = HOLEMI_DB::value( 'SELECT option_value FROM ' . $opt . ' WHERE option_name = ' . HOLEMI_DB::quote( $name ) );
+			if ( (string) $was !== (string) $value ) {
+				HOLEMI_DB::exec( 'DELETE FROM ' . $opt . ' WHERE option_name = ' . HOLEMI_DB::quote( $name ) );
+				HOLEMI_DB::exec( 'INSERT INTO ' . $opt . ' (option_name, option_value, autoload) VALUES (' . HOLEMI_DB::quote( $name ) . ', ' . HOLEMI_DB::quote( (string) $value ) . ", 'yes')" );
+				$this->job->log( sprintf( 'Kept this site\'s %1$s setting (%2$s) instead of the old site\'s (%3$s): the media files are in this site\'s uploads folder.', $name, '' === (string) $value ? 'empty' : $value, $was ) );
+			}
+		}
+
+		$active  = HOLEMI_DB::value( 'SELECT option_value FROM ' . $opt . " WHERE option_name = 'active_plugins'" );
 		$plugins = is_string( $active ) ? @unserialize( $active, array( 'allowed_classes' => false ) ) : array(); // phpcs:ignore
 		$plugins = is_array( $plugins ) ? $plugins : array();
 		$mine    = $s['target']['plugin'];
@@ -1257,11 +1379,11 @@ class HIO_Importer implements HIO_Tar_Handler {
 		if ( ! in_array( $mine, $plugins, true ) ) {
 			$plugins[] = $mine;
 		}
-		HIO_DB::exec( 'DELETE FROM ' . $opt . " WHERE option_name = 'active_plugins'" );
-		HIO_DB::exec( 'INSERT INTO ' . $opt . " (option_name, option_value, autoload) VALUES ('active_plugins', " . HIO_DB::quote( serialize( $plugins ) ) . ", 'yes')" ); // phpcs:ignore
+		HOLEMI_DB::exec( 'DELETE FROM ' . $opt . " WHERE option_name = 'active_plugins'" );
+		HOLEMI_DB::exec( 'INSERT INTO ' . $opt . " (option_name, option_value, autoload) VALUES ('active_plugins', " . HOLEMI_DB::quote( serialize( $plugins ) ) . ", 'yes')" ); // phpcs:ignore
 
 		// Caches that contain old paths/addresses are rebuilt automatically.
-		HIO_DB::exec( 'DELETE FROM ' . $opt . " WHERE option_name = 'rewrite_rules' OR option_name LIKE '\\_transient\\_%' OR option_name LIKE '\\_site\\_transient\\_%'" );
+		HOLEMI_DB::exec( 'DELETE FROM ' . $opt . " WHERE option_name = 'rewrite_rules' OR option_name LIKE '\\_transient\\_%' OR option_name LIKE '\\_site\\_transient\\_%'" );
 
 		$notice = array(
 			'time'     => time(),
@@ -1270,8 +1392,8 @@ class HIO_Importer implements HIO_Tar_Handler {
 			'flush'    => 1,
 			'job'      => $this->job->id, // Marker: proves this job's swap happened.
 		);
-		HIO_DB::exec( 'DELETE FROM ' . $opt . " WHERE option_name = 'hio_post_import'" );
-		HIO_DB::exec( 'INSERT INTO ' . $opt . " (option_name, option_value, autoload) VALUES ('hio_post_import', " . HIO_DB::quote( serialize( $notice ) ) . ", 'yes')" ); // phpcs:ignore
+		HOLEMI_DB::exec( 'DELETE FROM ' . $opt . " WHERE option_name = 'holemi_post_import'" );
+		HOLEMI_DB::exec( 'INSERT INTO ' . $opt . " (option_name, option_value, autoload) VALUES ('holemi_post_import', " . HOLEMI_DB::quote( serialize( $notice ) ) . ", 'yes')" ); // phpcs:ignore
 	}
 
 	/* --------------------------------------------------------------------
@@ -1281,7 +1403,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 	/**
 	 * Put the imported tables live.
 	 *
-	 * @throws HIO_Exception If the swap fails (the site is then unchanged).
+	 * @throws HOLEMI_Exception If the swap fails (the site is then unchanged).
 	 */
 	private function swap() {
 		$job = $this->job;
@@ -1293,7 +1415,7 @@ class HIO_Importer implements HIO_Tar_Handler {
 		}
 		$tmp = $s['dbi']['tmp'];
 		$dst = $s['target']['prefix'];
-		$new = HIO_DB::tables_with_prefix( $tmp );
+		$new = HOLEMI_DB::tables_with_prefix( $tmp );
 		if ( empty( $s['bak'] ) ) {
 			$s['bak'] = $this->free_prefix( 'hb' );
 		}
@@ -1305,32 +1427,32 @@ class HIO_Importer implements HIO_Tar_Handler {
 		// Only tables that get replaced are touched. Other tables (for example
 		// of a second WordPress install in the same database) are left alone.
 		$old = array_filter(
-			HIO_DB::tables_with_prefix( $dst ),
+			HOLEMI_DB::tables_with_prefix( $dst ),
 			function ( $t ) use ( $finals ) {
 				return isset( $finals[ $t ] );
 			}
 		);
 		$this->db_session();
 
-		$check = HIO_DB::value( 'SELECT COUNT(*) FROM ' . HIO_Util::ident( $tmp . 'options' ) . " WHERE option_name = 'siteurl'" );
+		$check = HOLEMI_DB::value( 'SELECT COUNT(*) FROM ' . HOLEMI_Util::ident( $tmp . 'options' ) . " WHERE option_name = 'siteurl'" );
 		if ( 1 > (int) $check ) {
-			throw new HIO_Exception( esc_html__( 'Safety check failed: the imported options table has no site address. Nothing was changed.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'Safety check failed: the imported options table has no site address. Nothing was changed.', 'hole-in-one-migration' ) );
 		}
 
 		$pairs = array();
 		foreach ( $old as $t ) {
-			$pairs[] = HIO_Util::ident( $t ) . ' TO ' . HIO_Util::ident( $bak . substr( $t, strlen( $dst ) ) );
+			$pairs[] = HOLEMI_Util::ident( $t ) . ' TO ' . HOLEMI_Util::ident( $bak . substr( $t, strlen( $dst ) ) );
 		}
 		foreach ( $new as $t ) {
 			$final = $dst . substr( $t, strlen( $tmp ) );
 			if ( strlen( $final ) > 64 ) {
-				throw new HIO_Exception( esc_html( sprintf( 'Table name too long: %s', $final ) ) );
+				throw new HOLEMI_Exception( esc_html( sprintf( 'Table name too long: %s', $final ) ) );
 			}
-			$pairs[] = HIO_Util::ident( $t ) . ' TO ' . HIO_Util::ident( $final );
+			$pairs[] = HOLEMI_Util::ident( $t ) . ' TO ' . HOLEMI_Util::ident( $final );
 		}
 		$job->log( sprintf( 'Swapping %d imported tables in (one atomic operation)…', count( $new ) ) );
 		$job->save(); // Checkpoint right before the point of no return.
-		HIO_DB::exec( 'RENAME TABLE ' . implode( ', ', $pairs ) );
+		HOLEMI_DB::exec( 'RENAME TABLE ' . implode( ', ', $pairs ) );
 		$s['swapped'] = true;
 		$job->save(); // ...and right after it.
 		$this->after_swap();
@@ -1341,18 +1463,18 @@ class HIO_Importer implements HIO_Tar_Handler {
 	 * the temporary tables are gone and the live options table carries this
 	 * job's marker (the request died between the swap and its checkpoint).
 	 *
-	 * @param HIO_Job $job Job.
+	 * @param HOLEMI_Job $job Job.
 	 * @return bool
 	 */
-	private static function is_swapped( HIO_Job $job ) {
+	private static function is_swapped( HOLEMI_Job $job ) {
 		$s = $job->state;
 		if ( ! empty( $s['swapped'] ) ) {
 			return true;
 		}
-		if ( empty( $s['dbi']['tmp'] ) || HIO_DB::tables_with_prefix( $s['dbi']['tmp'] ) ) {
+		if ( empty( $s['dbi']['tmp'] ) || HOLEMI_DB::tables_with_prefix( $s['dbi']['tmp'] ) ) {
 			return false;
 		}
-		$v = HIO_DB::value( 'SELECT option_value FROM ' . HIO_Util::ident( $s['target']['prefix'] . 'options' ) . " WHERE option_name = 'hio_post_import'" );
+		$v = HOLEMI_DB::value( 'SELECT option_value FROM ' . HOLEMI_Util::ident( $s['target']['prefix'] . 'options' ) . " WHERE option_name = 'holemi_post_import'" );
 		$v = is_string( $v ) ? @unserialize( $v, array( 'allowed_classes' => false ) ) : null; // phpcs:ignore
 		return is_array( $v ) && isset( $v['job'] ) && $v['job'] === $job->id;
 	}
@@ -1362,10 +1484,10 @@ class HIO_Importer implements HIO_Tar_Handler {
 	 * works without a login: after the swap the old login session is gone, so
 	 * the normal step request can no longer finish the job.
 	 *
-	 * @param HIO_Job $job Job (locked by the caller).
+	 * @param HOLEMI_Job $job Job (locked by the caller).
 	 * @return bool Whether the job was finished.
 	 */
-	public static function finish_if_swapped( HIO_Job $job ) {
+	public static function finish_if_swapped( HOLEMI_Job $job ) {
 		if ( 'imp' !== $job->state['kind'] || 'swap' !== $job->state['phase'] || ! self::is_swapped( $job ) ) {
 			return false;
 		}
@@ -1386,12 +1508,12 @@ class HIO_Importer implements HIO_Tar_Handler {
 		$s['swapped'] = true;
 		wp_cache_flush();
 		$this->db_session();
-		$backups = empty( $s['bak'] ) ? array() : HIO_DB::tables_with_prefix( $s['bak'] );
+		$backups = empty( $s['bak'] ) ? array() : HOLEMI_DB::tables_with_prefix( $s['bak'] );
 		foreach ( array_chunk( $backups, 50 ) as $chunk ) {
 			try {
-				HIO_DB::exec( 'DROP TABLE IF EXISTS ' . implode( ', ', array_map( array( 'HIO_Util', 'ident' ), $chunk ) ) );
-			} catch ( HIO_Exception $e ) {
-				$job->log( 'Could not remove old tables: ' . HIO_Util::plain( $e ), 'warning' );
+				HOLEMI_DB::exec( 'DROP TABLE IF EXISTS ' . implode( ', ', array_map( array( 'HOLEMI_Util', 'ident' ), $chunk ) ) );
+			} catch ( HOLEMI_Exception $e ) {
+				$job->log( 'Could not remove old tables: ' . HOLEMI_Util::plain( $e ), 'warning' );
 			}
 		}
 		$job->log( 'Database switched. Old tables removed.' );
@@ -1413,9 +1535,12 @@ class HIO_Importer implements HIO_Tar_Handler {
 	private function complete() {
 		$job = $this->job;
 		$s   = &$job->state;
-		self::remove_guard();
 		@unlink( $job->path( 'database.sql' ) ); // phpcs:ignore
 		@unlink( $job->path( 'zipindex.jsonl' ) ); // phpcs:ignore
+		// The folders that the imported ones replaced (kept until now for a cancel).
+		foreach ( array( 'replaced', 'files', 'staged', 'trash' ) as $sub ) {
+			HOLEMI_Storage::rrmdir( $job->path( $sub ) );
+		}
 		if ( ! empty( $s['own_archive'] ) ) {
 			@unlink( $s['archive'] ); // phpcs:ignore
 		} elseif ( ! empty( $s['target']['delete_after'] ) ) {
@@ -1435,41 +1560,21 @@ class HIO_Importer implements HIO_Tar_Handler {
 	}
 
 	/* --------------------------------------------------------------------
-	 * Cancel and guard.
+	 * Moving the extracted files into place.
 	 * ------------------------------------------------------------------ */
 
 	/**
-	 * Cancel an import: drop temporary tables, remove the guard, delete files.
+	 * Would replacing $dst touch a folder that must stay (a role folder, this
+	 * plugin or its storage)? Such an archive entry is skipped.
 	 *
-	 * @param HIO_Job $job Job.
-	 */
-	public static function cancel( HIO_Job $job ) {
-		if ( ! empty( $job->state['dbi']['tmp'] ) && 'done' !== $job->state['phase'] ) {
-			$tmp = $job->state['dbi']['tmp'];
-			try {
-				HIO_DB::exec( 'SET SESSION foreign_key_checks = 0' );
-				foreach ( array_chunk( HIO_DB::tables_with_prefix( $tmp ), 50 ) as $chunk ) {
-					HIO_DB::exec( 'DROP TABLE IF EXISTS ' . implode( ', ', array_map( array( 'HIO_Util', 'ident' ), $chunk ) ) );
-				}
-			} catch ( HIO_Exception $e ) {
-				unset( $e );
-			}
-		}
-		if ( ! self::other_imports_running( $job->id ) ) {
-			self::remove_guard();
-		}
-		$job->destroy();
-	}
-
-	/**
-	 * Is another import job unfinished?
-	 *
-	 * @param string $except Job id to ignore.
+	 * @param string $dst Live path.
 	 * @return bool
 	 */
-	private static function other_imports_running( $except ) {
-		foreach ( HIO_Job::unfinished() as $j ) {
-			if ( 'imp' === $j->state['kind'] && $j->id !== $except ) {
+	private function is_protected( $dst ) {
+		$t    = $this->job->state['target'];
+		$keep = array_merge( array_values( $t['dirs'] ), array( $t['plugin_dir'], HOLEMI_Storage::base() ) );
+		foreach ( $keep as $k ) {
+			if ( HOLEMI_Util::inside( $k, $dst ) ) {
 				return true;
 			}
 		}
@@ -1477,42 +1582,294 @@ class HIO_Importer implements HIO_Tar_Handler {
 	}
 
 	/**
-	 * Install a tiny must-use plugin that, ONLY for this plugin's own AJAX
-	 * requests, stops other plugins and the theme from loading. Files of
-	 * plugins and themes are overwritten during extraction; without the guard
-	 * a half-written plugin could crash the next import request.
-	 *
-	 * @param string  $basename Plugin basename.
-	 * @param HIO_Job $job      Job (for logging).
+	 * Move the extracted folders into place, one unit at a time: every folder
+	 * or file directly inside a role folder (one plugin, one theme, one uploads
+	 * year, one wp-content folder). Each unit is a single rename, so the live
+	 * site never sees a half-written plugin or theme. The unit it replaces is
+	 * moved into the job folder first and deleted only when the import is
+	 * complete; a cancelled import moves it back (see rollback_files()).
+	 * When a rename is impossible (staging and site on different disks), the
+	 * unit is copied in resumable chunks instead.
 	 */
-	private static function install_guard( $basename, HIO_Job $job ) {
-		$dir = defined( 'WPMU_PLUGIN_DIR' ) ? WPMU_PLUGIN_DIR : WP_CONTENT_DIR . '/mu-plugins';
-		if ( ! is_dir( $dir ) && ! wp_mkdir_p( $dir ) ) {
-			$job->log( 'Could not create the mu-plugins folder; continuing without the import guard.', 'warning' );
-			return;
+	private function install_files() {
+		$job = $this->job;
+		$s   = &$job->state;
+		if ( ! isset( $s['inst'] ) ) {
+			$units = array();
+			$base  = $job->path( 'files' );
+			foreach ( (array) @scandir( $base ) as $role ) { // phpcs:ignore
+				if ( ! is_string( $role ) || '.' === $role || '..' === $role || ! is_dir( $base . '/' . $role ) ) {
+					continue;
+				}
+				foreach ( (array) @scandir( $base . '/' . $role ) as $name ) { // phpcs:ignore
+					if ( is_string( $name ) && '.' !== $name && '..' !== $name ) {
+						$units[] = array( $role, base64_encode( $name ) ); // phpcs:ignore
+					}
+				}
+			}
+			$s['inst'] = array(
+				'units' => $units,
+				'i'     => 0,
+				'moved' => array(),
+				'copy'  => null,
+			);
+			$job->log( sprintf( 'Moving %d extracted folders and files into place.', count( $units ) ) );
+			$job->save();
 		}
-		$code = "<?php\n"
-			. "/**\n * Hole-in-One Migration import guard. Created automatically during an import and\n * removed automatically when it finishes. Safe to delete if no import is running.\n */\n"
-			. "if ( defined( 'DOING_AJAX' ) && DOING_AJAX && isset( \$_REQUEST['action'] ) && in_array( \$_REQUEST['action'], array( 'hio_step', 'hio_upload_chunk', 'hio_cancel' ), true ) ) {\n"
-			. "\t\$hio_plugin = " . var_export( $basename, true ) . ";\n" // phpcs:ignore
-			. "\tadd_filter( 'option_active_plugins', function () use ( \$hio_plugin ) { return array( \$hio_plugin ); }, PHP_INT_MAX );\n"
-			. "\tadd_filter( 'site_option_active_sitewide_plugins', function () { return array(); }, PHP_INT_MAX );\n"
-			. "\tadd_filter( 'pre_option_template', function () { return 'hio-no-theme'; } );\n"
-			. "\tadd_filter( 'pre_option_stylesheet', function () { return 'hio-no-theme'; } );\n"
-			. "\tadd_filter( 'validate_current_theme', '__return_false' );\n"
-			. "}\n";
-		if ( false === @file_put_contents( $dir . '/' . self::GUARD_FILE, $code ) ) { // phpcs:ignore
-			$job->log( 'Could not write the import guard; continuing without it.', 'warning' );
+		$in = &$s['inst'];
+
+		while ( $in['i'] < count( $in['units'] ) && ! $job->should_stop() ) {
+			$role = $in['units'][ $in['i'] ][0];
+			$name = base64_decode( $in['units'][ $in['i'] ][1] ); // phpcs:ignore
+			$src  = $job->path( 'files/' . $role . '/' . $name );
+			$dst  = $this->target_dir( $role ) . '/' . $name;
+			$old  = $job->path( 'replaced/' . $role . '/' . $name );
+			$unit = array( $role, $in['units'][ $in['i'] ][1] );
+
+			if ( null !== $in['copy'] ) {
+				if ( ! $this->copy_step( $in['copy'] ) ) {
+					break; // Time is up; continue in the next request.
+				}
+				if ( is_dir( $src ) ) {
+					HOLEMI_Storage::rrmdir( $src );
+				} else {
+					@unlink( $src ); // phpcs:ignore
+				}
+				$in['moved'][] = array_merge( $unit, array( ! empty( $in['copy']['replaced'] ), true, ! empty( $in['copy']['merged'] ) ) );
+				$in['copy']    = null;
+				$in['i']++;
+				$job->save();
+				continue;
+			}
+			if ( ! file_exists( $src ) && ! is_link( $src ) ) {
+				// Moved by a request that stopped before its checkpoint.
+				if ( file_exists( $dst ) ) {
+					$in['moved'][] = array_merge( $unit, array( file_exists( $old ), false, false ) );
+				}
+				$in['i']++;
+				continue;
+			}
+			if ( $this->is_protected( $dst ) ) {
+				$job->log( sprintf( 'Skipped %s from the archive: it would replace a folder this site needs (%s).', $role . '/' . $name, $dst ), 'warning' );
+				$in['i']++;
+				continue;
+			}
+			$replaced = file_exists( $old ) || is_link( $old );
+			if ( file_exists( $dst ) || is_link( $dst ) ) {
+				wp_mkdir_p( dirname( $old ) );
+				if ( ! $replaced && @rename( $dst, $old ) ) { // phpcs:ignore
+					$replaced = true;
+				} else {
+					// The existing one cannot be moved aside: copy over it.
+					$job->log( sprintf( 'Could not move %s aside; copying the imported files over it (a cancel cannot undo this one).', $dst ), 'warning' );
+					$in['copy'] = self::copy_state( $src, $dst, $replaced, true );
+					continue;
+				}
+			}
+			if ( ! is_dir( dirname( $dst ) ) ) {
+				wp_mkdir_p( dirname( $dst ) );
+			}
+			if ( @rename( $src, $dst ) ) { // phpcs:ignore
+				$in['moved'][] = array_merge( $unit, array( $replaced, false, false ) );
+				$in['i']++;
+				$job->save();
+				continue;
+			}
+			// Different disk: copy in chunks.
+			$in['copy'] = self::copy_state( $src, $dst, $replaced, false );
+		}
+
+		$n             = max( 1, count( $in['units'] ) );
+		$s['progress'] = max( (int) $s['progress'], 95 + (int) ( 4 * $in['i'] / $n ) );
+		/* translators: 1: number of items moved, 2: number of items. */
+		$s['message']  = sprintf( __( 'Moving the files into place: %1$d of %2$d', 'hole-in-one-migration' ), $in['i'], count( $in['units'] ) );
+		if ( $in['i'] >= count( $in['units'] ) ) {
+			HOLEMI_Storage::rrmdir( $job->path( 'files' ) );
+			$job->log( 'Files are in place.' );
+			if ( 'files' === $s['manifest']['contents'] ) {
+				$s['phase'] = 'finish_files';
+			} else {
+				$s['phase']   = 'swap';
+				$s['message'] = __( 'Switching to the new database…', 'hole-in-one-migration' );
+			}
 		}
 	}
 
 	/**
-	 * Remove the guard.
+	 * State of a resumable copy.
+	 *
+	 * @param string $src      Source (file or folder).
+	 * @param string $dst      Destination.
+	 * @param bool   $replaced The old unit was moved aside.
+	 * @param bool   $merged   Copying over an existing unit.
+	 * @return array
 	 */
-	public static function remove_guard() {
-		$dir = defined( 'WPMU_PLUGIN_DIR' ) ? WPMU_PLUGIN_DIR : WP_CONTENT_DIR . '/mu-plugins';
-		if ( is_file( $dir . '/' . self::GUARD_FILE ) ) {
-			@unlink( $dir . '/' . self::GUARD_FILE ); // phpcs:ignore
+	private static function copy_state( $src, $dst, $replaced, $merged ) {
+		return array(
+			'src'      => base64_encode( $src ), // phpcs:ignore
+			'dst'      => base64_encode( $dst ), // phpcs:ignore
+			'stack'    => is_dir( $src ) ? array( base64_encode( '' ) ) : array(), // phpcs:ignore
+			'dir'      => '',
+			'files'    => is_dir( $src ) ? array() : array( base64_encode( '' ) ), // phpcs:ignore
+			'cur'      => null,
+			'replaced' => $replaced,
+			'merged'   => $merged,
+		);
+	}
+
+	/**
+	 * Copy a unit until it is done (true) or time is up (false). Works like
+	 * every other step: a file being copied is truncated back to its saved
+	 * offset when the copy continues.
+	 *
+	 * @param array $c Copy state (by reference).
+	 * @return bool
+	 */
+	private function copy_step( array &$c ) {
+		$job = $this->job;
+		$src = base64_decode( $c['src'] ); // phpcs:ignore
+		$dst = base64_decode( $c['dst'] ); // phpcs:ignore
+		while ( ! $job->should_stop() ) {
+			if ( $c['cur'] ) {
+				$rel = base64_decode( $c['cur']['rel'] ); // phpcs:ignore
+				if ( ! $this->copy_chunks( $src . $rel, $dst . $rel, $c['cur']['off'] ) ) {
+					return false;
+				}
+				$c['cur'] = null;
+				continue;
+			}
+			if ( $c['files'] ) {
+				$rel = $c['dir'] . base64_decode( array_shift( $c['files'] ) ); // phpcs:ignore
+				$p   = $src . $rel;
+				if ( is_dir( $p ) && ! is_link( $p ) ) {
+					$c['stack'][] = base64_encode( $rel ); // phpcs:ignore
+				} elseif ( is_file( $p ) ) {
+					$c['cur'] = array(
+						'rel' => base64_encode( $rel ), // phpcs:ignore
+						'off' => 0,
+					);
+				}
+				continue;
+			}
+			if ( ! $c['stack'] ) {
+				return true;
+			}
+			$dir = base64_decode( array_pop( $c['stack'] ) ); // phpcs:ignore
+			wp_mkdir_p( $dst . $dir );
+			$c['dir']   = $dir . '/';
+			$c['files'] = array();
+			foreach ( (array) @scandir( $src . $dir ) as $n ) { // phpcs:ignore
+				if ( is_string( $n ) && '.' !== $n && '..' !== $n ) {
+					$c['files'][] = base64_encode( $n ); // phpcs:ignore
+				}
+			}
 		}
+		return false;
+	}
+
+	/**
+	 * Copy one file from $off on, until done (true) or time is up (false).
+	 *
+	 * @param string $from Source.
+	 * @param string $to   Destination.
+	 * @param int    $off  Bytes already copied (by reference).
+	 * @return bool
+	 */
+	private function copy_chunks( $from, $to, &$off ) {
+		$in  = @fopen( $from, 'rb' ); // phpcs:ignore
+		$out = @fopen( $to, 'c+b' ); // phpcs:ignore
+		if ( ! $in || ! $out ) {
+			$this->job->log( 'Could not copy ' . $to . ' (check permissions).', 'warning' );
+			if ( $in ) {
+				fclose( $in );
+			}
+			if ( $out ) {
+				fclose( $out );
+			}
+			return true;
+		}
+		ftruncate( $out, $off );
+		fseek( $out, $off );
+		fseek( $in, $off );
+		$chunk = $this->job->scaled( 2097152, 65536 );
+		$done  = false;
+		while ( ! $this->job->should_stop() ) {
+			$buf = fread( $in, $chunk );
+			if ( false === $buf || '' === $buf ) {
+				$done = true;
+				break;
+			}
+			HOLEMI_Util::fwrite_all( $out, $buf );
+			$off += strlen( $buf );
+		}
+		fclose( $in );
+		fclose( $out );
+		if ( $done ) {
+			@touch( $to, (int) @filemtime( $from ) ); // phpcs:ignore
+		}
+		return $done;
+	}
+
+	/**
+	 * Undo install_files() for a cancelled import: take the imported units out
+	 * and move the replaced ones back. Only before the database swap.
+	 */
+	private function rollback_files() {
+		$job = $this->job;
+		if ( empty( $job->state['inst']['moved'] ) ) {
+			return;
+		}
+		foreach ( array_reverse( $job->state['inst']['moved'] ) as $m ) {
+			$role = $m[0];
+			$name = base64_decode( $m[1] ); // phpcs:ignore
+			$dst  = $this->target_dir( $role ) . '/' . $name;
+			$old  = $job->path( 'replaced/' . $role . '/' . $name );
+			if ( ! empty( $m[4] ) ) {
+				$job->log( 'Cannot undo ' . $dst . ': the imported files were copied over it.', 'warning' );
+				continue;
+			}
+			if ( file_exists( $dst ) || is_link( $dst ) ) {
+				$trash = $job->path( 'trash/' . $role . '/' . $name );
+				wp_mkdir_p( dirname( $trash ) );
+				if ( ! @rename( $dst, $trash ) ) { // phpcs:ignore
+					$job->log( 'Could not remove the imported ' . $dst . '.', 'warning' );
+					continue;
+				}
+			}
+			if ( ! empty( $m[2] ) && ( file_exists( $old ) || is_link( $old ) ) && ! @rename( $old, $dst ) ) { // phpcs:ignore
+				$job->log( 'Could not restore ' . $dst . '.', 'warning' );
+			}
+		}
+	}
+
+	/* --------------------------------------------------------------------
+	 * Cancel.
+	 * ------------------------------------------------------------------ */
+
+	/**
+	 * Cancel an import: put back replaced files, drop temporary tables and
+	 * delete the job folder. After the database swap the import is complete
+	 * and nothing is undone.
+	 *
+	 * @param HOLEMI_Job $job Job.
+	 */
+	public static function cancel( HOLEMI_Job $job ) {
+		if ( 'done' !== $job->state['phase'] && ! self::is_swapped( $job ) ) {
+			$imp      = new self();
+			$imp->job = $job;
+			$imp->rollback_files();
+			if ( ! empty( $job->state['dbi']['tmp'] ) ) {
+				$tmp = $job->state['dbi']['tmp'];
+				try {
+					HOLEMI_DB::exec( 'SET SESSION foreign_key_checks = 0' );
+					foreach ( array_chunk( HOLEMI_DB::tables_with_prefix( $tmp ), 50 ) as $chunk ) {
+						HOLEMI_DB::exec( 'DROP TABLE IF EXISTS ' . implode( ', ', array_map( array( 'HOLEMI_Util', 'ident' ), $chunk ) ) );
+					}
+				} catch ( HOLEMI_Exception $e ) {
+					unset( $e );
+				}
+			}
+		}
+		$job->destroy();
 	}
 }

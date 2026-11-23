@@ -51,7 +51,7 @@ Most migration plugins try to do everything in one long request, and hosts kill 
 1. **Old site:** install the plugin, go to **Migration → Export**, click **Start export**, then **Download**.
 2. **New host:** install a fresh, empty WordPress and this plugin. Nothing else.
 3. **New site:** go to **Migration → Import**, choose the file and click **Upload and import**.
-   For very large files, upload the archive by FTP into `wp-content/hio-migration/import/` and click **Import this file**.
+   For very large files, upload the archive by FTP into the import folder shown on the Import page and click **Import this file**.
 4. **Log in with the username and password of the OLD site.** The users came over with the database.
 5. Point your domain's DNS to the new host, set up SSL, and delete the backup files on both sites.
 
@@ -76,20 +76,29 @@ These tests ran in Docker, not on real hosting providers. Reports from real host
 ## FAQ
 
 **What's included?**
-The `wp-content` folder (uploads, plugins, themes, languages) and all database tables with your WordPress table prefix. WordPress core and `wp-config.php` aren't included: the new host has its own, with its own database login.
+The `wp-content` folder (uploads, plugins, themes, languages), plugin/theme/uploads folders the site keeps outside `wp-content`, and all database tables with your WordPress table prefix. WordPress core and `wp-config.php` aren't included: the new host has its own, with its own database login.
 
 **Where are backups stored? Are they safe?**
-In `wp-content/hio-migration/backups/` under long random names that can't be guessed. Working files sit in a folder that denies web access. On **nginx** servers that protection doesn't apply, so delete backups right after downloading them. Uninstalling the plugin deletes all its backups.
+In `wp-content/hole-in-one-migration-<random>/`, a folder with an unguessable name that denies all web access (`.htaccess`/`web.config`; on nginx the random name keeps it hidden). Archives are downloaded through WordPress by administrators only. Delete backups after downloading them. Uninstalling the plugin deletes all its backups.
 
 **Is Multisite supported?**
 No, single sites only.
 
 **Can I open the archive myself?**
-Yes. Inside are `wp-content/`, `hio-database.sql` and `hio-manifest.json`.
+Yes. Inside are `wp-content/`, `hio-database.sql` and `hio-manifest.json` (plus `outside-wp-content/` if some folders live outside wp-content).
 
 ## For developers
 
 How the chunking, resume logic, archive writers and atomic database swap work, plus the full test notes: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+**Automated tests.** Every push and pull request runs [CI](.github/workflows/ci.yml): a PHP 7.4–8.5 syntax check, a check that the version numbers match, and a full migration test in Docker on the newest WordPress with PHP 8.5 (plus WordPress.org Plugin Check) and on WordPress 6.1 with PHP 7.4. The migration test builds a site with tricky content, exports it with version 1.0.2, imports it with the current code, then exports and imports again. It also cancels an import just before the database swap and checks that nothing changed, and moves the media outside `wp-content`. Then it compares every table and file. To run it locally (needs Docker):
+
+```sh
+tests/e2e/run.sh                    # seeded test site, about 2 minutes
+tests/e2e/run.sh my-site.tar.gz     # or a real site archive
+```
+
+**Releases.** Push a tag that matches the plugin version (`git tag v1.1.1 && git push origin v1.1.1`). The [release workflow](.github/workflows/release.yml) runs the full CI on that commit, checks the version numbers, builds `hole-in-one-migration.zip` and publishes a GitHub release with it. To build the zip yourself: `bin/build-zip.sh`.
 
 ## Support
 

@@ -12,15 +12,15 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Main plugin class.
  */
-class HIO_Plugin {
+class HOLEMI_Plugin {
 
 	const SLUG  = 'hole-in-one-migration';
-	const NONCE = 'hio_ajax';
+	const NONCE = 'holemi_ajax';
 
 	/**
 	 * Instance.
 	 *
-	 * @var HIO_Plugin|null
+	 * @var HOLEMI_Plugin|null
 	 */
 	private static $instance = null;
 
@@ -41,7 +41,7 @@ class HIO_Plugin {
 	/**
 	 * Singleton.
 	 *
-	 * @return HIO_Plugin
+	 * @return HOLEMI_Plugin
 	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
@@ -58,7 +58,7 @@ class HIO_Plugin {
 		add_action( 'admin_init', array( $this, 'admin_init' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'assets' ) );
 		add_action( 'admin_notices', array( $this, 'notices' ) );
-		add_filter( 'plugin_action_links_' . plugin_basename( HIO_FILE ), array( $this, 'action_links' ) );
+		add_filter( 'plugin_action_links_' . plugin_basename( HOLEMI_FILE ), array( $this, 'action_links' ) );
 		add_filter( 'plugin_row_meta', array( $this, 'row_meta' ), 10, 2 );
 
 		foreach ( array( 'export_start', 'import_start', 'upload_chunk', 'step', 'cancel', 'delete_backup' ) as $a ) {
@@ -72,14 +72,14 @@ class HIO_Plugin {
 		add_action( 'admin_post_hio_download', array( $this, 'download' ) );
 		add_action( 'admin_post_hio_dismiss', array( $this, 'dismiss' ) );
 		add_action( 'admin_post_hio_log', array( $this, 'download_log' ) );
-		register_activation_hook( HIO_FILE, array( __CLASS__, 'activate' ) );
+		register_activation_hook( HOLEMI_FILE, array( __CLASS__, 'activate' ) );
 	}
 
 	/**
 	 * Activation: create storage folders.
 	 */
 	public static function activate() {
-		HIO_Storage::ensure();
+		HOLEMI_Storage::ensure();
 	}
 
 	/**
@@ -102,21 +102,20 @@ class HIO_Plugin {
 	 */
 	public function admin_init() {
 		register_setting(
-			'hio_settings_group',
-			HIO_Util::OPTION,
+			'holemi_settings_group',
+			HOLEMI_Util::OPTION,
 			array(
 				'type'              => 'array',
-				'sanitize_callback' => array( 'HIO_Util', 'sanitize_settings' ),
-				'default'           => HIO_Util::defaults(),
+				'sanitize_callback' => array( 'HOLEMI_Util', 'sanitize_settings' ),
+				'default'           => HOLEMI_Util::defaults(),
 			)
 		);
 
 		// First admin page load after an import: rebuild permalinks (.htaccess).
-		$post = get_option( 'hio_post_import' );
+		$post = get_option( 'holemi_post_import' );
 		if ( is_array( $post ) && ! empty( $post['flush'] ) && current_user_can( 'manage_options' ) ) {
 			$post['flush'] = 0;
-			update_option( 'hio_post_import', $post );
-			require_once ABSPATH . 'wp-admin/includes/misc.php';
+			update_option( 'holemi_post_import', $post );
 			flush_rewrite_rules( true );
 		}
 	}
@@ -140,7 +139,7 @@ class HIO_Plugin {
 	 * @return array
 	 */
 	public function row_meta( $meta, $file ) {
-		if ( plugin_basename( HIO_FILE ) === $file && self::coffee_url() ) {
+		if ( plugin_basename( HOLEMI_FILE ) === $file && self::coffee_url() ) {
 			$meta[] = '<a href="' . esc_url( self::coffee_url() ) . '" target="_blank" rel="noopener noreferrer">☕ ' . esc_html__( 'Buy me a coffee', 'hole-in-one-migration' ) . '</a>';
 		}
 		return $meta;
@@ -152,7 +151,7 @@ class HIO_Plugin {
 	 * @return string
 	 */
 	public static function coffee_url() {
-		return (string) apply_filters( 'hio_buymeacoffee_url', HIO_BUYMEACOFFEE_URL );
+		return (string) apply_filters( 'holemi_buymeacoffee_url', HOLEMI_BUYMEACOFFEE_URL );
 	}
 
 	/**
@@ -164,19 +163,19 @@ class HIO_Plugin {
 		if ( 'toplevel_page_' . self::SLUG !== $hook ) {
 			return;
 		}
-		wp_enqueue_style( 'hio-admin', HIO_URL . 'assets/admin.css', array(), HIO_VERSION );
-		wp_enqueue_script( 'hio-admin', HIO_URL . 'assets/admin.js', array(), HIO_VERSION, true );
+		wp_enqueue_style( 'holemi-admin', HOLEMI_URL . 'assets/admin.css', array(), HOLEMI_VERSION );
+		wp_enqueue_script( 'holemi-admin', HOLEMI_URL . 'assets/admin.js', array(), HOLEMI_VERSION, true );
 
 		$limit    = (int) wp_max_upload_size();
 		$chunk    = (int) max( 262144, min( 5242880, ( $limit > 0 ? $limit : 2097152 ) - 131072 ) );
-		$settings = HIO_Util::settings();
+		$settings = HOLEMI_Util::settings();
 		$resume   = array();
-		foreach ( HIO_Job::unfinished() as $job ) {
+		foreach ( HOLEMI_Job::unfinished() as $job ) {
 			$resume[] = $this->payload( $job, true );
 		}
 		wp_localize_script(
-			'hio-admin',
-			'HIO',
+			'holemi-admin',
+			'HOLEMI',
 			array(
 				'ajax'    => admin_url( 'admin-ajax.php' ),
 				'nonce'   => wp_create_nonce( self::NONCE ),
@@ -266,11 +265,11 @@ class HIO_Plugin {
 	/**
 	 * Job data for the browser.
 	 *
-	 * @param HIO_Job $job      Job.
+	 * @param HOLEMI_Job $job      Job.
 	 * @param bool    $with_log Include the log tail.
 	 * @return array
 	 */
-	private function payload( HIO_Job $job, $with_log = false ) {
+	private function payload( HOLEMI_Job $job, $with_log = false ) {
 		$s   = $job->state;
 		$out = array(
 			'id'       => $job->id,
@@ -285,9 +284,9 @@ class HIO_Plugin {
 			'created'  => (int) $s['created'],
 			'logUrl'   => add_query_arg(
 				array(
-					'action'   => 'hio_log',
+					'action'   => 'holemi_log',
 					'job'      => $job->id,
-					'_wpnonce' => wp_create_nonce( 'hio_log' ),
+					'_wpnonce' => wp_create_nonce( 'holemi_log' ),
 				),
 				admin_url( 'admin-post.php' )
 			),
@@ -299,8 +298,7 @@ class HIO_Plugin {
 			$file          = $s['result']['file'];
 			$out['result'] = array(
 				'file'   => $file,
-				'size'   => HIO_Util::size( $s['result']['size'] ),
-				'direct' => HIO_Storage::backup_url( $file ),
+				'size'   => HOLEMI_Util::size( $s['result']['size'] ),
 				'php'    => self::php_download_url( $file ),
 			);
 		}
@@ -320,9 +318,9 @@ class HIO_Plugin {
 		// Raw URL (not HTML-escaped like wp_nonce_url): it is also sent as JSON.
 		return add_query_arg(
 			array(
-				'action'   => 'hio_download',
+				'action'   => 'holemi_download',
 				'file'     => rawurlencode( $file ),
-				'_wpnonce' => wp_create_nonce( 'hio_download' ),
+				'_wpnonce' => wp_create_nonce( 'holemi_download' ),
 			),
 			admin_url( 'admin-post.php' )
 		);
@@ -334,7 +332,7 @@ class HIO_Plugin {
 	public function ajax_export_start() {
 		$this->begin_ajax();
 		try {
-			$job = HIO_Exporter::start(
+			$job = HOLEMI_Exporter::start(
 				array(
 					'contents'        => self::post( 'contents', 'both' ),
 					'format'          => self::post( 'format', 'tar.gz' ),
@@ -343,7 +341,7 @@ class HIO_Plugin {
 			);
 			$this->ok( $this->payload( $job ) );
 		} catch ( Throwable $e ) {
-			$this->fail( HIO_Util::plain( $e ) );
+			$this->fail( HOLEMI_Util::plain( $e ) );
 		}
 	}
 
@@ -353,19 +351,19 @@ class HIO_Plugin {
 	public function ajax_import_start() {
 		$this->begin_ajax();
 		try {
-			foreach ( HIO_Job::unfinished() as $other ) {
+			foreach ( HOLEMI_Job::unfinished() as $other ) {
 				if ( 'imp' === $other->state['kind'] ) {
-					throw new HIO_Exception( esc_html__( 'Another import is unfinished. Resume or cancel it first (see the top of this page).', 'hole-in-one-migration' ) );
+					throw new HOLEMI_Exception( esc_html__( 'Another import is unfinished. Resume or cancel it first (see the top of this page).', 'hole-in-one-migration' ) );
 				}
 			}
 			if ( 'server' === self::post( 'source' ) ) {
-				$job = HIO_Importer::start_server_file( self::post( 'file' ) );
+				$job = HOLEMI_Importer::start_server_file( self::post( 'file' ) );
 			} else {
-				$job = HIO_Importer::start_upload( self::post( 'name' ), (int) self::post( 'size' ) );
+				$job = HOLEMI_Importer::start_upload( self::post( 'name' ), (int) self::post( 'size' ) );
 			}
 			$this->ok( $this->payload( $job ) );
 		} catch ( Throwable $e ) {
-			$this->fail( HIO_Util::plain( $e ) );
+			$this->fail( HOLEMI_Util::plain( $e ) );
 		}
 	}
 
@@ -374,14 +372,14 @@ class HIO_Plugin {
 	 */
 	public function ajax_upload_chunk() {
 		$this->begin_ajax();
-		$job = HIO_Job::load( self::post( 'job' ) );
+		$job = HOLEMI_Job::load( self::post( 'job' ) );
 		if ( ! $job ) {
 			$this->fail( __( 'Job not found.', 'hole-in-one-migration' ), 'gone' );
 		}
 		if ( ! $job->lock() ) {
 			$this->ok( array( 'busy' => true ) );
 		}
-		HIO_Util::prepare_runtime( 60 );
+		HOLEMI_Util::prepare_runtime( 60 );
 		try {
 			// The nonce was verified above. Only the temporary path and the error
 			// code are used; the file is never moved to a name the client chose.
@@ -391,9 +389,9 @@ class HIO_Plugin {
 			// phpcs:enable WordPress.Security.NonceVerification.Missing
 			if ( '' === $tmp || 0 !== $err || ! is_uploaded_file( $tmp ) ) {
 				/* translators: %d: PHP upload error code. */
-				throw new HIO_Exception( esc_html( sprintf( __( 'The chunk was not received (upload error %d).', 'hole-in-one-migration' ), $err ) ) );
+				throw new HOLEMI_Exception( esc_html( sprintf( __( 'The chunk was not received (upload error %d).', 'hole-in-one-migration' ), $err ) ) );
 			}
-			$have = HIO_Importer::upload_chunk( $job, (int) self::post( 'offset' ), $tmp );
+			$have = HOLEMI_Importer::upload_chunk( $job, (int) self::post( 'offset' ), $tmp );
 			$job->unlock();
 			$this->ok(
 				array(
@@ -405,7 +403,7 @@ class HIO_Plugin {
 			);
 		} catch ( Throwable $e ) {
 			$job->unlock();
-			$this->fail( HIO_Util::plain( $e ), 'chunk' );
+			$this->fail( HOLEMI_Util::plain( $e ), 'chunk' );
 		}
 	}
 
@@ -414,7 +412,7 @@ class HIO_Plugin {
 	 */
 	public function ajax_step() {
 		$this->begin_ajax();
-		$job = HIO_Job::load( self::post( 'job' ) );
+		$job = HOLEMI_Job::load( self::post( 'job' ) );
 		if ( ! $job ) {
 			$this->fail( __( 'Job not found. It may have been cancelled.', 'hole-in-one-migration' ), 'gone' );
 		}
@@ -445,22 +443,22 @@ class HIO_Plugin {
 		$job->begin_step( '1' === self::post( 'retry' ) );
 		try {
 			if ( 'exp' === $job->state['kind'] ) {
-				HIO_Exporter::step( $job );
+				HOLEMI_Exporter::step( $job );
 			} else {
-				HIO_Importer::step( $job );
+				HOLEMI_Importer::step( $job );
 			}
 			$job->save();
 		} catch ( Throwable $e ) {
 			// Keep the last good checkpoint; only record the error.
 			$log   = $job->new_log;
-			$fresh = HIO_Job::load( $job->id );
+			$fresh = HOLEMI_Job::load( $job->id );
 			if ( $fresh ) {
 				$job->state = $fresh->state;
 			}
 			$job->new_log         = $log;
 			$job->state['status'] = 'error';
-			$job->state['error']  = HIO_Util::plain( $e );
-			$job->log( HIO_Util::plain( $e ), 'error' );
+			$job->state['error']  = HOLEMI_Util::plain( $e );
+			$job->log( HOLEMI_Util::plain( $e ), 'error' );
 			try {
 				$job->save();
 			} catch ( Throwable $e2 ) {
@@ -483,7 +481,7 @@ class HIO_Plugin {
 		if ( ! $err || ! in_array( $err['type'], array( E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR ), true ) ) {
 			return;
 		}
-		$job = HIO_Job::load( $this->current_job );
+		$job = HOLEMI_Job::load( $this->current_job );
 		if ( $job ) {
 			$job->log( 'PHP fatal error: ' . $err['message'] . ' in ' . $err['file'] . ':' . $err['line'], 'warning' );
 		}
@@ -516,14 +514,14 @@ class HIO_Plugin {
 		// id (96 bits) is the secret instead, and only import jobs are shown to
 		// visitors who are not logged in. It returns progress only, never data.
 		$id  = sanitize_key( self::post( 'job' ) );
-		$job = HIO_Job::load( $id );
+		$job = HOLEMI_Job::load( $id );
 		if ( ! $job || ( 'imp' !== $job->state['kind'] && ! current_user_can( 'manage_options' ) ) ) {
 			$this->fail( __( 'Job not found.', 'hole-in-one-migration' ), 'gone' );
 		}
 		// The swap happened but its request died before finishing: finish now.
 		if ( 'imp' === $job->state['kind'] && 'swap' === $job->state['phase'] && $job->lock() ) {
 			try {
-				HIO_Importer::finish_if_swapped( $job );
+				HOLEMI_Importer::finish_if_swapped( $job );
 			} catch ( Throwable $e ) {
 				unset( $e );
 			}
@@ -550,10 +548,20 @@ class HIO_Plugin {
 	 */
 	public function ajax_cancel() {
 		$this->begin_ajax();
-		$job = HIO_Job::load( self::post( 'job' ) );
+		$job = HOLEMI_Job::load( self::post( 'job' ) );
 		if ( $job ) {
+			// Wait for a step that is still running (the browser stops sending
+			// new ones as soon as Cancel is clicked).
+			$locked = $job->lock();
+			for ( $i = 0; ! $locked && $i < 40; $i++ ) {
+				usleep( 500000 );
+				$locked = $job->lock();
+			}
+			if ( ! $locked ) {
+				$this->fail( __( 'The server is still working on this job. Please try again in a minute.', 'hole-in-one-migration' ) );
+			}
 			if ( 'imp' === $job->state['kind'] ) {
-				HIO_Importer::cancel( $job );
+				HOLEMI_Importer::cancel( $job );
 			} else {
 				$job->destroy();
 			}
@@ -567,7 +575,7 @@ class HIO_Plugin {
 	public function ajax_delete_backup() {
 		$this->begin_ajax();
 		$name = basename( self::post( 'file' ) );
-		foreach ( HIO_Storage::backups() as $b ) {
+		foreach ( HOLEMI_Storage::backups() as $b ) {
 			if ( $b['name'] === $name ) {
 				@unlink( $b['path'] ); // phpcs:ignore
 				@unlink( $b['path'] . '.json' ); // phpcs:ignore
@@ -586,12 +594,12 @@ class HIO_Plugin {
 	 * downloads can be resumed by the browser or a download manager.
 	 */
 	public function download() {
-		if ( ! current_user_can( 'manage_options' ) || ! check_admin_referer( 'hio_download' ) ) {
+		if ( ! current_user_can( 'manage_options' ) || ! check_admin_referer( 'holemi_download' ) ) {
 			wp_die( esc_html__( 'You are not allowed to do this.', 'hole-in-one-migration' ), 403 );
 		}
 		$name = isset( $_GET['file'] ) ? basename( sanitize_file_name( wp_unslash( $_GET['file'] ) ) ) : '';
 		$path = '';
-		foreach ( HIO_Storage::backups() as $b ) {
+		foreach ( HOLEMI_Storage::backups() as $b ) {
 			if ( $b['name'] === $name ) {
 				$path = $b['path'];
 			}
@@ -647,16 +655,16 @@ class HIO_Plugin {
 	 * Download the full log of a job.
 	 */
 	public function download_log() {
-		if ( ! current_user_can( 'manage_options' ) || ! check_admin_referer( 'hio_log' ) ) {
+		if ( ! current_user_can( 'manage_options' ) || ! check_admin_referer( 'holemi_log' ) ) {
 			wp_die( esc_html__( 'You are not allowed to do this.', 'hole-in-one-migration' ), 403 );
 		}
-		$job = HIO_Job::load( isset( $_GET['job'] ) ? sanitize_key( wp_unslash( $_GET['job'] ) ) : '' );
+		$job = HOLEMI_Job::load( isset( $_GET['job'] ) ? sanitize_key( wp_unslash( $_GET['job'] ) ) : '' );
 		if ( ! $job ) {
 			wp_die( esc_html__( 'Log not found.', 'hole-in-one-migration' ), 404 );
 		}
 		nocache_headers();
 		header( 'Content-Type: text/plain; charset=utf-8' );
-		header( 'Content-Disposition: attachment; filename="hio-' . $job->id . '.log"' );
+		header( 'Content-Disposition: attachment; filename="holemi-' . $job->id . '.log"' );
 		readfile( $job->path( 'log.txt' ) ); // phpcs:ignore
 		exit;
 	}
@@ -665,8 +673,8 @@ class HIO_Plugin {
 	 * Dismiss the post-import notice.
 	 */
 	public function dismiss() {
-		if ( current_user_can( 'manage_options' ) && check_admin_referer( 'hio_dismiss' ) ) {
-			delete_option( 'hio_post_import' );
+		if ( current_user_can( 'manage_options' ) && check_admin_referer( 'holemi_dismiss' ) ) {
+			delete_option( 'holemi_post_import' );
 		}
 		wp_safe_redirect( wp_get_referer() ? wp_get_referer() : admin_url() );
 		exit;
@@ -683,29 +691,53 @@ class HIO_Plugin {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
-		$post = get_option( 'hio_post_import' );
+		$post = get_option( 'holemi_post_import' );
 		if ( is_array( $post ) ) {
-			$url = wp_nonce_url( admin_url( 'admin-post.php?action=hio_dismiss' ), 'hio_dismiss' );
+			$url = wp_nonce_url( admin_url( 'admin-post.php?action=holemi_dismiss' ), 'holemi_dismiss' );
 			echo '<div class="notice notice-success"><p><strong>' . esc_html__( 'Hole-in-One Migration: your site was imported successfully!', 'hole-in-one-migration' ) . '</strong> ';
 			/* translators: %s old site address */
 			echo esc_html( sprintf( __( 'Content was moved from %s.', 'hole-in-one-migration' ), $post['from'] ) ) . ' ';
 			echo esc_html__( 'Please check a few pages. If you see "page not found" errors, go to Settings → Permalinks and click "Save Changes" once.', 'hole-in-one-migration' );
 			echo ' <a href="' . esc_url( $url ) . '">' . esc_html__( 'Dismiss', 'hole-in-one-migration' ) . '</a></p></div>';
 		}
-		$guard = ( defined( 'WPMU_PLUGIN_DIR' ) ? WPMU_PLUGIN_DIR : WP_CONTENT_DIR . '/mu-plugins' ) . '/' . HIO_Importer::GUARD_FILE;
 		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
-		if ( is_file( $guard ) && $screen && 'toplevel_page_' . self::SLUG !== $screen->id ) {
+		if ( $screen && 'toplevel_page_' . self::SLUG !== $screen->id && self::import_unfinished() ) {
 			/* translators: %s: link to the import page. */
 			echo '<div class="notice notice-warning"><p>' . wp_kses_post( sprintf( __( 'An import with <strong>Hole-in-One Migration</strong> is unfinished. <a href="%s">Resume or cancel it</a>.', 'hole-in-one-migration' ), esc_url( admin_url( 'admin.php?page=' . self::SLUG . '&tab=import' ) ) ) ) . '</p></div>';
 		}
 	}
 
 	/**
+	 * The FTP import folder, relative to the WordPress folder when it is inside it.
+	 *
+	 * @return string
+	 */
+	public static function import_folder_label() {
+		$dir  = HOLEMI_Storage::dir( 'import' );
+		$root = HOLEMI_Util::install_dir();
+		return ( 0 === strpos( $dir, $root . '/' ) ? substr( $dir, strlen( $root ) ) : $dir ) . '/';
+	}
+
+	/**
+	 * Is an import job unfinished?
+	 *
+	 * @return bool
+	 */
+	private static function import_unfinished() {
+		foreach ( HOLEMI_Job::unfinished() as $job ) {
+			if ( 'imp' === $job->state['kind'] ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * Remove finished job folders older than 3 days.
 	 */
 	private function cleanup() {
-		foreach ( (array) glob( HIO_Storage::dir( 'work' ) . '/*', GLOB_ONLYDIR ) as $d ) {
-			$job = HIO_Job::load( basename( $d ) );
+		foreach ( (array) glob( HOLEMI_Storage::dir( 'work' ) . '/*', GLOB_ONLYDIR ) as $d ) {
+			$job = HOLEMI_Job::load( basename( $d ) );
 			if ( $job && 'done' === $job->state['phase'] && $job->state['updated'] < time() - 3 * DAY_IN_SECONDS ) {
 				$job->destroy();
 			}
@@ -719,7 +751,7 @@ class HIO_Plugin {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
-		HIO_Storage::ensure();
+		HOLEMI_Storage::ensure();
 		$this->cleanup();
 		$tabs = array(
 			'export'   => __( 'Export', 'hole-in-one-migration' ),
@@ -730,7 +762,7 @@ class HIO_Plugin {
 		);
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
 		$tab = isset( $_GET['tab'] ) && isset( $tabs[ $_GET['tab'] ] ) ? sanitize_key( $_GET['tab'] ) : 'export';
-		$settings = HIO_Util::settings();
-		include HIO_DIR . 'admin/page.php';
+		$settings = HOLEMI_Util::settings();
+		include HOLEMI_DIR . 'admin/page.php';
 	}
 }

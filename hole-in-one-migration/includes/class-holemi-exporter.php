@@ -13,7 +13,7 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Exporter.
  */
-class HIO_Exporter {
+class HOLEMI_Exporter {
 
 	/** Files up to this size are read in one go (bytes). */
 	const SMALL_FILE = 4194304;
@@ -65,12 +65,12 @@ class HIO_Exporter {
 	 * Start an export job.
 	 *
 	 * @param array $opts contents (both|files|db), format (tar.gz|zip), exclude_uploads.
-	 * @return HIO_Job
-	 * @throws HIO_Exception On error.
+	 * @return HOLEMI_Job
+	 * @throws HOLEMI_Exception On error.
 	 */
 	public static function start( array $opts ) {
 		global $wpdb;
-		$settings = HIO_Util::settings();
+		$settings = HOLEMI_Util::settings();
 		$contents = in_array( $opts['contents'] ?? '', array( 'both', 'files', 'db' ), true ) ? $opts['contents'] : 'both';
 		$format   = ( 'zip' === ( $opts['format'] ?? $settings['format'] ) ) ? 'zip' : 'tar.gz';
 
@@ -78,13 +78,11 @@ class HIO_Exporter {
 			$format = 'zip';
 		}
 
-		$job = HIO_Job::create( 'exp' );
+		$job = HOLEMI_Job::create( 'exp' );
 		$s   = &$job->state;
 
-		$excludes   = array( HIO_Storage::rel(), 'plugins/' . dirname( plugin_basename( HIO_FILE ) ), 'mu-plugins/0000-hio-import-guard.php' );
-		if ( ! empty( $opts['exclude_uploads'] ) ) {
-			$excludes[] = self::uploads_rel();
-		}
+		// Leftover of an unfinished import made with a version before 1.1.0.
+		$excludes = array( 'mu-plugins/0000-hio-import-guard.php' );
 		if ( ! empty( $settings['exclude_cache'] ) ) {
 			$excludes = array_merge( $excludes, self::cache_excludes() );
 		}
@@ -102,9 +100,10 @@ class HIO_Exporter {
 			'exclude_uploads' => ! empty( $opts['exclude_uploads'] ),
 		);
 		$s['excludes'] = array_values( array_unique( array_filter( $excludes ) ) );
+		self::plan_roots( $job, ! empty( $opts['exclude_uploads'] ) );
 		$s['phase']    = ( 'db' === $contents ) ? 'db' : 'scan';
 		$s['scan']     = array(
-			'stack'     => array( '' ),
+			'stack'     => array_reverse( wp_list_pluck( $s['roots'], 'name' ) ),
 			'list_size' => 0,
 			'files'     => 0,
 			'dirs'      => 0,
@@ -121,26 +120,100 @@ class HIO_Exporter {
 	}
 
 	/**
-	 * Uploads folder relative to wp-content.
+	 * Decide which folders go into the archive and under which name.
 	 *
+	 * wp-content is stored as "wp-content/...". Plugins, must-use plugins,
+	 * themes and uploads are usually inside it; when the site keeps one of them
+	 * somewhere else (WP_PLUGIN_DIR, WPMU_PLUGIN_DIR, a theme root or an upload
+	 * path outside wp-content), that folder is stored as
+	 * "outside-wp-content/<role>/..." and the manifest says which archive
+	 * folder holds which role, so the importer puts it where the NEW site keeps
+	 * that role.
+	 *
+	 * @param HOLEMI_Job $job             Job.
+	 * @param bool       $exclude_uploads Leave out the media library.
+	 */
+	private static function plan_roots( HOLEMI_Job $job, $exclude_uploads ) {
+		$s       = &$job->state;
+		$content = HOLEMI_Util::content_dir();
+		$roots   = array(
+			array(
+				'name' => 'wp-content',
+				'path' => $content,
+				'role' => 'content',
+			),
+		);
+		$map     = array();
+		// Never archived, wherever they are: this plugin and its storage folder.
+		$skip = array( untrailingslashit( wp_normalize_path( plugin_dir_path( HOLEMI_FILE ) ) ), HOLEMI_Storage::base() );
+		foreach ( HOLEMI_Util::roots() as $role => $dir ) {
+			if ( HOLEMI_Util::inside( $dir, $content ) ) {
+				$map[ $role ] = 'wp-content' . substr( $dir, strlen( $content ) );
+			} elseif ( is_dir( $dir ) && ! HOLEMI_Util::inside( $content, $dir ) ) {
+				$taken = false;
+				foreach ( $roots as $r ) {
+					$taken = $taken || HOLEMI_Util::inside( $dir, $r['path'] );
+				}
+				if ( ! $taken ) {
+					$roots[] = array(
+						'name' => 'outside-wp-content/' . $role,
+						'path' => $dir,
+						'role' => $role,
+					);
+					$job->log( sprintf( 'The %1$s folder is outside wp-content (%2$s); it is exported too.', $role, $dir ) );
+				}
+				$map[ $role ] = 'outside-wp-content/' . $role;
+				// A folder with the default name left behind in wp-content is not used by this site.
+				if ( is_dir( $content . '/' . $role ) ) {
+					$skip[] = $content . '/' . $role;
+					$job->log( sprintf( 'Skipped wp-content/%s: this site keeps its %s elsewhere.', $role, $role ) );
+				}
+			}
+			if ( 'uploads' === $role && $exclude_uploads ) {
+				$skip[] = $dir;
+			}
+		}
+		$s['roots']      = $roots;
+		$s['role_map']   = $map;
+		$s['skip_paths'] = array_values( array_unique( $skip ) );
+	}
+
+	/**
+	 * Absolute path of an archive name (or null if it is outside every root).
+	 *
+	 * @param string $name  Archive name without a trailing slash.
+	 * @param array  $roots Roots from plan_roots().
+	 * @return string|null
+	 */
+	private static function source_path( $name, array $roots ) {
+		foreach ( $roots as $r ) {
+			if ( $name === $r['name'] || 0 === strpos( $name, $r['name'] . '/' ) ) {
+				return $r['path'] . substr( $name, strlen( $r['name'] ) );
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Path used for exclusion patterns: relative to wp-content, with folders
+	 * stored outside it under their role name ("plugins/...", "uploads/...").
+	 *
+	 * @param string $name Archive name.
 	 * @return string
 	 */
-	private static function uploads_rel() {
-		$up   = wp_upload_dir( null, false );
-		$base = wp_normalize_path( $up['basedir'] );
-		$wpc  = wp_normalize_path( WP_CONTENT_DIR );
-		if ( 0 === strpos( $base, $wpc . '/' ) ) {
-			return substr( $base, strlen( $wpc ) + 1 );
+	private static function logical( $name ) {
+		if ( 0 === strpos( $name, 'wp-content/' ) ) {
+			return substr( $name, 11 );
 		}
-		return 'uploads';
+		return preg_replace( '#^outside-wp-content/#', '', $name );
 	}
 
 	/**
 	 * Do as much work as possible within the step budget.
 	 *
-	 * @param HIO_Job $job Job.
+	 * @param HOLEMI_Job $job Job.
 	 */
-	public static function step( HIO_Job $job ) {
+	public static function step( HOLEMI_Job $job ) {
 		while ( ! $job->should_stop() && 'done' !== $job->state['phase'] ) {
 			switch ( $job->state['phase'] ) {
 				case 'scan':
@@ -153,7 +226,7 @@ class HIO_Exporter {
 					self::archive( $job );
 					break;
 				default:
-					throw new HIO_Exception( esc_html( 'Unknown phase.' ) );
+					throw new HOLEMI_Exception( esc_html( 'Unknown phase.' ) );
 			}
 		}
 	}
@@ -184,31 +257,34 @@ class HIO_Exporter {
 	/**
 	 * Scan directories until time runs out.
 	 *
-	 * @param HIO_Job $job Job.
-	 * @throws HIO_Exception On error.
+	 * @param HOLEMI_Job $job Job.
+	 * @throws HOLEMI_Exception On error.
 	 */
-	private static function scan( HIO_Job $job ) {
+	private static function scan( HOLEMI_Job $job ) {
 		$sc   = &$job->state['scan'];
 		$list = $job->path( 'filelist.txt' );
 		$fp   = fopen( $list, 'c+b' ); // phpcs:ignore
 		if ( ! $fp ) {
-			throw new HIO_Exception( esc_html__( 'Could not write the file list.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'Could not write the file list.', 'hole-in-one-migration' ) );
 		}
 		ftruncate( $fp, $sc['list_size'] );
 		fseek( $fp, 0, SEEK_END );
-		$root = rtrim( WP_CONTENT_DIR, '/\\' );
-		$ex   = $job->state['excludes'];
+		$roots = $job->state['roots'];
+		$ex    = $job->state['excludes'];
+		$skip  = $job->state['skip_paths'];
+		$tops  = wp_list_pluck( $roots, 'name' );
 
+		// The stack holds archive names of folders still to read ("wp-content/plugins", ...).
 		while ( ! empty( $sc['stack'] ) && ! $job->should_stop() ) {
 			$rel  = array_pop( $sc['stack'] );
-			$full = '' === $rel ? $root : $root . '/' . $rel;
-			$dh   = @opendir( $full ); // phpcs:ignore
+			$full = self::source_path( $rel, $roots );
+			$dh   = null === $full ? false : @opendir( $full ); // phpcs:ignore
 			if ( ! $dh ) {
-				$job->log( 'Cannot read folder, skipped: wp-content/' . $rel, 'warning' );
+				$job->log( 'Cannot read folder, skipped: ' . $rel, 'warning' );
 				continue;
 			}
-			if ( '' !== $rel ) {
-				HIO_Util::fwrite_all( $fp, $rel . "/\n" );
+			if ( ! in_array( $rel, $tops, true ) ) {
+				HOLEMI_Util::fwrite_all( $fp, $rel . "/\n" );
 				$sc['dirs']++;
 			}
 			$subdirs = array();
@@ -216,27 +292,30 @@ class HIO_Exporter {
 				if ( '.' === $name || '..' === $name ) {
 					continue;
 				}
-				$r = '' === $rel ? $name : $rel . '/' . $name;
+				$r = $rel . '/' . $name;
 				$p = $full . '/' . $name;
 				if ( false !== strpbrk( $name, "\n\r" ) ) {
-					$job->log( 'File name contains a line break, skipped: wp-content/' . $r, 'warning' );
+					$job->log( 'File name contains a line break, skipped: ' . $r, 'warning' );
 					continue;
 				}
-				if ( self::excluded( $r, $ex ) ) {
+				if ( self::excluded( self::logical( $r ), $ex ) || in_array( wp_normalize_path( $p ), $skip, true ) ) {
 					continue;
+				}
+				if ( 'wp-content' === $rel && is_dir( $p ) && HOLEMI_Storage::is_storage_name( $name ) ) {
+					continue; // Storage folder of this plugin (also an old or a copied one).
 				}
 				if ( is_dir( $p ) ) {
 					if ( is_link( $p ) ) {
-						$job->log( 'Symlinked folder skipped: wp-content/' . $r, 'warning' );
+						$job->log( 'Symlinked folder skipped: ' . $r, 'warning' );
 						continue;
 					}
 					$subdirs[] = $r;
 				} elseif ( is_file( $p ) ) {
 					if ( ! is_readable( $p ) ) {
-						$job->log( 'File not readable, skipped: wp-content/' . $r, 'warning' );
+						$job->log( 'File not readable, skipped: ' . $r, 'warning' );
 						continue;
 					}
-					HIO_Util::fwrite_all( $fp, $r . "\n" );
+					HOLEMI_Util::fwrite_all( $fp, $r . "\n" );
 					$sc['files']++;
 					$sc['bytes'] += (float) @filesize( $p ); // phpcs:ignore
 				}
@@ -252,14 +331,14 @@ class HIO_Exporter {
 		fclose( $fp );
 
 		/* translators: 1: number of files, 2: total size, e.g. 12 MB. */
-		$job->state['message']  = sprintf( __( 'Scanning files: %1$s files found (%2$s)', 'hole-in-one-migration' ), HIO_Util::num( $sc['files'] ), HIO_Util::size( $sc['bytes'] ) );
+		$job->state['message']  = sprintf( __( 'Scanning files: %1$s files found (%2$s)', 'hole-in-one-migration' ), HOLEMI_Util::num( $sc['files'] ), HOLEMI_Util::size( $sc['bytes'] ) );
 		$job->state['progress'] = 2;
 
 		if ( empty( $sc['stack'] ) ) {
-			$job->log( sprintf( 'Scan complete: %d files in %d folders, %s', $sc['files'], $sc['dirs'], HIO_Util::size( $sc['bytes'] ) ) );
-			$free = HIO_Util::free_space( HIO_Storage::base() );
+			$job->log( sprintf( 'Scan complete: %d files in %d folders, %s', $sc['files'], $sc['dirs'], HOLEMI_Util::size( $sc['bytes'] ) ) );
+			$free = HOLEMI_Util::free_space( HOLEMI_Storage::base() );
 			if ( null !== $free && $free < $sc['bytes'] * 1.05 ) {
-				$job->log( sprintf( 'Low disk space: %s free, the site has %s of files. The archive is compressed, but the export may fail if the disk fills up.', HIO_Util::size( $free ), HIO_Util::size( $sc['bytes'] ) ), 'warning' );
+				$job->log( sprintf( 'Low disk space: %s free, the site has %s of files. The archive is compressed, but the export may fail if the disk fills up.', HOLEMI_Util::size( $free ), HOLEMI_Util::size( $sc['bytes'] ) ), 'warning' );
 			}
 			$job->state['phase'] = 'both' === $job->state['opts']['contents'] ? 'db' : 'archive';
 		}
@@ -272,19 +351,19 @@ class HIO_Exporter {
 	/**
 	 * Prepare the list of tables.
 	 *
-	 * @param HIO_Job $job Job.
+	 * @param HOLEMI_Job $job Job.
 	 */
-	private static function dump_init( HIO_Job $job ) {
+	private static function dump_init( HOLEMI_Job $job ) {
 		global $wpdb;
 		$tables = array();
 		$total  = 0;
 		$status = array();
-		foreach ( HIO_DB::rows( 'SHOW TABLE STATUS', true ) as $r ) {
+		foreach ( HOLEMI_DB::rows( 'SHOW TABLE STATUS', true ) as $r ) {
 			$status[ $r['Name'] ] = $r;
 		}
-		foreach ( HIO_DB::tables_with_prefix( $wpdb->prefix ) as $t ) {
-			$cols     = HIO_DB::columns( $t );
-			$pk       = HIO_DB::primary_key( $t );
+		foreach ( HOLEMI_DB::tables_with_prefix( $wpdb->prefix ) as $t ) {
+			$cols     = HOLEMI_DB::columns( $t );
+			$pk       = HOLEMI_DB::primary_key( $t );
 			$rows     = isset( $status[ $t ]['Rows'] ) ? (int) $status[ $t ]['Rows'] : 0;
 			$avg      = isset( $status[ $t ]['Avg_row_length'] ) ? (int) $status[ $t ]['Avg_row_length'] : 0;
 			$batch    = $avg > 0 ? (int) max( 50, min( 5000, floor( 16777216 / $avg ) ) ) : 2000;
@@ -307,9 +386,9 @@ class HIO_Exporter {
 			'rows_done'  => 0,
 			'rows_total' => max( 1, $total ),
 		);
-		$job->log( sprintf( 'Database: %d tables, about %s rows.', count( $tables ), HIO_Util::num( $total ) ) );
+		$job->log( sprintf( 'Database: %d tables, about %s rows.', count( $tables ), HOLEMI_Util::num( $total ) ) );
 		$header = '-- Hole-in-One Migration database dump' . "\n"
-			. '-- Site: ' . HIO_Util::raw_url( 'home' ) . "\n"
+			. '-- Site: ' . HOLEMI_Util::raw_url( 'home' ) . "\n"
 			. '-- Date: ' . gmdate( 'c' ) . "\n"
 			. '-- Table prefix is replaced by ' . self::PREFIX_TOKEN . "\n"
 			// Like mysqldump: makes the file import correctly with any MySQL
@@ -339,16 +418,16 @@ class HIO_Exporter {
 		if ( preg_match( '/binary|blob|^bit|geometry|point|polygon|linestring/', $type ) ) {
 			return '' === $v ? "''" : '0x' . bin2hex( $v );
 		}
-		return "'" . HIO_Util::sql_escape( $v ) . "'";
+		return "'" . HOLEMI_Util::sql_escape( $v ) . "'";
 	}
 
 	/**
 	 * Dump rows until time runs out.
 	 *
-	 * @param HIO_Job $job Job.
-	 * @throws HIO_Exception On error.
+	 * @param HOLEMI_Job $job Job.
+	 * @throws HOLEMI_Exception On error.
 	 */
-	private static function dump( HIO_Job $job ) {
+	private static function dump( HOLEMI_Job $job ) {
 		global $wpdb;
 		if ( ! isset( $job->state['db'] ) ) {
 			self::dump_init( $job );
@@ -356,7 +435,7 @@ class HIO_Exporter {
 		$db = &$job->state['db'];
 		$fp = fopen( $job->path( 'database.sql' ), 'c+b' ); // phpcs:ignore
 		if ( ! $fp ) {
-			throw new HIO_Exception( esc_html__( 'Could not write the database dump.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'Could not write the database dump.', 'hole-in-one-migration' ) );
 		}
 		ftruncate( $fp, $db['sql_size'] );
 		fseek( $fp, 0, SEEK_END );
@@ -365,14 +444,14 @@ class HIO_Exporter {
 		while ( $db['ti'] < count( $db['tables'] ) && ! $job->should_stop() ) {
 			$t     = $db['tables'][ $db['ti'] ];
 			$name  = $t['name'];
-			$qname = HIO_Util::ident( $name );
-			$tok   = HIO_Util::ident( self::PREFIX_TOKEN . substr( $name, $plen ) );
+			$qname = HOLEMI_Util::ident( $name );
+			$tok   = HOLEMI_Util::ident( self::PREFIX_TOKEN . substr( $name, $plen ) );
 
 			if ( ! $db['created'] ) {
-				$row    = HIO_DB::rows( 'SHOW CREATE TABLE ' . $qname );
+				$row    = HOLEMI_DB::rows( 'SHOW CREATE TABLE ' . $qname );
 				$create = isset( $row[0][1] ) ? $row[0][1] : '';
 				if ( '' === $create ) {
-					throw new HIO_Exception( esc_html( 'Could not read structure of table ' . $name ) );
+					throw new HOLEMI_Exception( esc_html( 'Could not read structure of table ' . $name ) );
 				}
 				// Replace the prefix in all backticked identifiers (table + FK references).
 				$create = preg_replace_callback(
@@ -383,7 +462,7 @@ class HIO_Exporter {
 					$create
 				);
 				$create = str_replace( array( "\r\n", "\n", "\r" ), ' ', $create );
-				HIO_Util::fwrite_all( $fp, "\n-- Table " . $name . "\nDROP TABLE IF EXISTS " . $tok . ";\n" . $create . ";\n" );
+				HOLEMI_Util::fwrite_all( $fp, "\n-- Table " . $name . "\nDROP TABLE IF EXISTS " . $tok . ";\n" . $create . ";\n" );
 				$db['created'] = true;
 				$db['last']    = null;
 				$db['offset']  = 0;
@@ -397,7 +476,7 @@ class HIO_Exporter {
 					}
 				)
 			);
-			$names = implode( ',', array_map( array( 'HIO_Util', 'ident' ), wp_list_pluck( $cols, 'name' ) ) );
+			$names = implode( ',', array_map( array( 'HOLEMI_Util', 'ident' ), wp_list_pluck( $cols, 'name' ) ) );
 			$types = wp_list_pluck( $cols, 'type' );
 			$batch = $job->scaled( $t['batch'], 5 );
 
@@ -416,9 +495,9 @@ class HIO_Exporter {
 			$sql = 'SELECT ' . $names . ' FROM ' . $qname;
 			if ( $pk_idx ) {
 				if ( null !== $db['last'] ) {
-					$sql .= ' WHERE ' . HIO_DB::after( $t['pk'], (array) $db['last'] );
+					$sql .= ' WHERE ' . HOLEMI_DB::after( $t['pk'], (array) $db['last'] );
 				}
-				$sql .= ' ORDER BY ' . implode( ',', array_map( array( 'HIO_Util', 'ident' ), $t['pk'] ) ) . ' LIMIT ' . $batch;
+				$sql .= ' ORDER BY ' . implode( ',', array_map( array( 'HOLEMI_Util', 'ident' ), $t['pk'] ) ) . ' LIMIT ' . $batch;
 			} else {
 				$sql .= ' LIMIT ' . (int) $db['offset'] . ',' . $batch;
 			}
@@ -427,7 +506,7 @@ class HIO_Exporter {
 			$head = 'INSERT INTO ' . $tok . ' (' . $names . ') VALUES ';
 			$buf  = '';
 			$last = null;
-			$n    = HIO_DB::each(
+			$n    = HOLEMI_DB::each(
 				$sql,
 				function ( $r ) use ( $fp, $head, $types, $pk_idx, &$buf, &$last ) {
 					$vals = array();
@@ -436,7 +515,7 @@ class HIO_Exporter {
 					}
 					$tuple = '(' . implode( ',', $vals ) . ')';
 					if ( '' !== $buf && strlen( $buf ) + strlen( $tuple ) > self::MAX_STATEMENT ) {
-						HIO_Util::fwrite_all( $fp, $head . $buf . ";\n" );
+						HOLEMI_Util::fwrite_all( $fp, $head . $buf . ";\n" );
 						$buf = '';
 					}
 					$buf .= ( '' === $buf ? '' : ',' ) . $tuple;
@@ -449,7 +528,7 @@ class HIO_Exporter {
 				}
 			);
 			if ( '' !== $buf ) {
-				HIO_Util::fwrite_all( $fp, $head . $buf . ";\n" );
+				HOLEMI_Util::fwrite_all( $fp, $head . $buf . ";\n" );
 			}
 			$db['rows_done'] += $n;
 			$db['offset']    += $n;
@@ -473,7 +552,7 @@ class HIO_Exporter {
 		if ( $db['ti'] >= count( $db['tables'] ) ) {
 			file_put_contents( $job->path( 'database.sql' ), "-- End of dump\n", FILE_APPEND ); // phpcs:ignore
 			$db['sql_size'] = filesize( $job->path( 'database.sql' ) );
-			$job->log( sprintf( 'Database export complete: %s rows, %s.', HIO_Util::num( $db['rows_done'] ), HIO_Util::size( $db['sql_size'] ) ) );
+			$job->log( sprintf( 'Database export complete: %s rows, %s.', HOLEMI_Util::num( $db['rows_done'] ), HOLEMI_Util::size( $db['sql_size'] ) ) );
 			$job->state['phase'] = 'archive';
 		}
 	}
@@ -490,39 +569,47 @@ class HIO_Exporter {
 	 */
 	private static function raw_option( $name ) {
 		global $wpdb;
-		return (string) HIO_DB::value( 'SELECT option_value FROM ' . HIO_Util::ident( $wpdb->options ) . ' WHERE option_name = ' . HIO_DB::quote( $name ) . ' LIMIT 1' );
+		return (string) HOLEMI_DB::value( 'SELECT option_value FROM ' . HOLEMI_Util::ident( $wpdb->options ) . ' WHERE option_name = ' . HOLEMI_DB::quote( $name ) . ' LIMIT 1' );
 	}
 
 	/**
 	 * Write the manifest and initialize the archive state.
 	 *
-	 * @param HIO_Job $job Job.
+	 * @param HOLEMI_Job $job Job.
 	 */
-	private static function archive_init( HIO_Job $job ) {
+	private static function archive_init( HOLEMI_Job $job ) {
 		global $wpdb, $wp_version;
 		$s        = &$job->state;
 		$contents = $s['opts']['contents'];
+		$dirs     = HOLEMI_Util::roots();
+		$outside  = 'db' !== $contents && isset( $s['roots'] ) && count( $s['roots'] ) > 1;
 		$manifest = array(
 			'generator'      => 'holeinone-migration', // Archive format id: keep, older versions check it.
-			'plugin_version' => HIO_VERSION,
-			'format_version' => HIO_FORMAT_VERSION,
+			'plugin_version' => HOLEMI_VERSION,
+			// 2 = has folders outside wp-content, which versions before 1.1.0 would skip.
+			'format_version' => $outside ? 2 : 1,
 			'created'        => gmdate( 'c' ),
 			'contents'       => $contents,
-			'home'           => HIO_Util::raw_url( 'home' ),
-			'siteurl'        => HIO_Util::raw_url( 'siteurl' ),
+			'home'           => HOLEMI_Util::raw_url( 'home' ),
+			'siteurl'        => HOLEMI_Util::raw_url( 'siteurl' ),
 			'db_home'        => self::raw_option( 'home' ),
 			'db_siteurl'     => self::raw_option( 'siteurl' ),
-			'content_url'    => HIO_Util::raw_content_urls()[0],
-			'abspath'        => untrailingslashit( wp_normalize_path( ABSPATH ) ),
-			'content_dir'    => untrailingslashit( wp_normalize_path( WP_CONTENT_DIR ) ),
-			'uploads_url'    => HIO_Util::raw_content_urls()[1],
-			'uploads_dir'    => untrailingslashit( wp_normalize_path( wp_upload_dir( null, false )['basedir'] ) ),
+			'content_url'    => HOLEMI_Util::raw_content_urls()[0],
+			'abspath'        => HOLEMI_Util::install_dir(),
+			'content_dir'    => HOLEMI_Util::content_dir(),
+			'uploads_url'    => HOLEMI_Util::raw_content_urls()[1],
+			'uploads_dir'    => $dirs['uploads'],
+			'plugins_dir'    => $dirs['plugins'],
+			'mu_plugins_dir' => $dirs['mu-plugins'],
+			'themes_dir'     => $dirs['themes'],
+			// Archive folder of each role (see plan_roots()).
+			'roots'          => isset( $s['role_map'] ) ? $s['role_map'] : array(),
 			'prefix'         => $wpdb->prefix,
 			'wp_version'     => $wp_version,
 			'php_version'    => PHP_VERSION,
-			'mysql_version'  => (string) HIO_DB::value( 'SELECT VERSION()' ),
+			'mysql_version'  => (string) HOLEMI_DB::value( 'SELECT VERSION()' ),
 			'multisite'      => is_multisite(),
-			'plugin_dir'     => dirname( plugin_basename( HIO_FILE ) ),
+			'plugin_dir'     => dirname( plugin_basename( HOLEMI_FILE ) ),
 			'files'          => isset( $s['scan']['files'] ) ? $s['scan']['files'] : 0,
 			'bytes'          => isset( $s['scan']['bytes'] ) ? $s['scan']['bytes'] : 0,
 			'db_rows'        => isset( $s['db']['rows_done'] ) ? $s['db']['rows_done'] : 0,
@@ -531,7 +618,7 @@ class HIO_Exporter {
 		);
 		file_put_contents( $job->path( 'manifest.json' ), wp_json_encode( $manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) ); // phpcs:ignore
 
-		$host  = sanitize_title( preg_replace( '#^https?://#', '', HIO_Util::raw_url( 'home' ) ) );
+		$host  = sanitize_title( preg_replace( '#^https?://#', '', HOLEMI_Util::raw_url( 'home' ) ) );
 		$token = bin2hex( random_bytes( 8 ) );
 		$ext   = 'zip' === $s['opts']['format'] ? 'zip' : 'tar.gz';
 		$label = array(
@@ -570,10 +657,10 @@ class HIO_Exporter {
 	/**
 	 * Add files to the archive until time runs out.
 	 *
-	 * @param HIO_Job $job Job.
-	 * @throws HIO_Exception On error.
+	 * @param HOLEMI_Job $job Job.
+	 * @throws HOLEMI_Exception On error.
 	 */
-	private static function archive( HIO_Job $job ) {
+	private static function archive( HOLEMI_Job $job ) {
 		if ( ! isset( $job->state['arc'] ) ) {
 			self::archive_init( $job );
 		}
@@ -581,8 +668,8 @@ class HIO_Exporter {
 		$a     = &$s['arc'];
 		$zip   = 'zip' === $s['opts']['format'];
 		$path  = $job->path( 'archive.part' );
-		$w     = $zip ? new HIO_Zip_Writer( $path, $job->path( 'central.bin' ), $a['writer'] ) : new HIO_Tar_Writer( $path, $a['writer'] );
-		$root  = rtrim( WP_CONTENT_DIR, '/\\' );
+		$w     = $zip ? new HOLEMI_Zip_Writer( $path, $job->path( 'central.bin' ), $a['writer'] ) : new HOLEMI_Tar_Writer( $path, $a['writer'] );
+		$roots = isset( $s['roots'] ) ? $s['roots'] : array();
 		$files = 'db' !== $s['opts']['contents'];
 		$list  = $files ? fopen( $job->path( 'filelist.txt' ), 'rb' ) : null; // phpcs:ignore
 		$done  = false;
@@ -637,12 +724,12 @@ class HIO_Exporter {
 					$rel           = rtrim( $line, "\n" );
 					if ( '/' === substr( $rel, -1 ) ) {
 						$dir = rtrim( $rel, '/' );
-						$w->add_dir( 'wp-content/' . $dir, (int) @filemtime( $root . '/' . $dir ) ); // phpcs:ignore
+						$w->add_dir( $dir, (int) @filemtime( (string) self::source_path( $dir, $roots ) ) ); // phpcs:ignore
 						$a['entries']++;
 						continue;
 					}
-					$name = 'wp-content/' . $rel;
-					$src  = $root . '/' . $rel;
+					$name = $rel;
+					$src  = (string) self::source_path( $rel, $roots );
 				} else {
 					$done = true;
 					break;
@@ -656,7 +743,7 @@ class HIO_Exporter {
 				$size  = (int) filesize( $src );
 				$mtime = (int) filemtime( $src );
 				if ( $size <= self::SMALL_FILE ) {
-					$data = @file_get_contents( $src ); // phpcs:ignore
+					$data = HOLEMI_Util::read_file( $src );
 					if ( false === $data ) {
 						$job->log( 'Could not read file, skipped: ' . $name, 'warning' );
 						continue;
@@ -689,7 +776,7 @@ class HIO_Exporter {
 		$pct                    = min( 1, $a['bytes_done'] / $a['bytes_all'] );
 		$s['progress']          = 30 + (int) ( 69 * $pct );
 		/* translators: 1: size done, 2: total size, 3: number of files. */
-		$s['message']           = sprintf( __( 'Creating archive: %1$s of %2$s (%3$s files)', 'hole-in-one-migration' ), HIO_Util::size( $a['bytes_done'] ), HIO_Util::size( $a['bytes_all'] ), HIO_Util::num( $a['entries'] ) );
+		$s['message']           = sprintf( __( 'Creating archive: %1$s of %2$s (%3$s files)', 'hole-in-one-migration' ), HOLEMI_Util::size( $a['bytes_done'] ), HOLEMI_Util::size( $a['bytes_all'] ), HOLEMI_Util::num( $a['entries'] ) );
 
 		if ( $done ) {
 			self::finalize( $job );
@@ -699,20 +786,20 @@ class HIO_Exporter {
 	/**
 	 * Move the archive to backups/ and clean up.
 	 *
-	 * @param HIO_Job $job Job.
-	 * @throws HIO_Exception On error.
+	 * @param HOLEMI_Job $job Job.
+	 * @throws HOLEMI_Exception On error.
 	 */
-	private static function finalize( HIO_Job $job ) {
+	private static function finalize( HOLEMI_Job $job ) {
 		$s    = &$job->state;
-		$dest = HIO_Storage::dir( 'backups' ) . '/' . $s['arc']['file'];
+		$dest = HOLEMI_Storage::dir( 'backups' ) . '/' . $s['arc']['file'];
 		if ( ! @rename( $job->path( 'archive.part' ), $dest ) ) { // phpcs:ignore
-			throw new HIO_Exception( esc_html__( 'Could not move the finished archive into the backups folder.', 'hole-in-one-migration' ) );
+			throw new HOLEMI_Exception( esc_html__( 'Could not move the finished archive into the backups folder.', 'hole-in-one-migration' ) );
 		}
 		$size = filesize( $dest );
 		$meta = array(
 			'contents' => $s['opts']['contents'],
 			'format'   => $s['opts']['format'],
-			'site'     => HIO_Util::raw_url( 'home' ),
+			'site'     => HOLEMI_Util::raw_url( 'home' ),
 			'created'  => time(),
 			'files'    => $s['scan']['files'] ?? 0,
 			'warnings' => $s['warnings'],
@@ -721,7 +808,7 @@ class HIO_Exporter {
 		foreach ( array( 'database.sql', 'filelist.txt', 'central.bin' ) as $f ) {
 			@unlink( $job->path( $f ) ); // phpcs:ignore
 		}
-		$job->log( sprintf( 'Archive complete: %s (%s, %d entries).', $s['arc']['file'], HIO_Util::size( $size ), $s['arc']['entries'] ) );
+		$job->log( sprintf( 'Archive complete: %s (%s, %d entries).', $s['arc']['file'], HOLEMI_Util::size( $size ), $s['arc']['entries'] ) );
 		$s['phase']    = 'done';
 		$s['status']   = 'done';
 		$s['progress'] = 100;
