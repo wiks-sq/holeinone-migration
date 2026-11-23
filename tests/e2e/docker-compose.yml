@@ -3,6 +3,8 @@
 #   old  the source site, running plugin 1.0.2 (taken from git history by run.sh)
 #   a    imports the archive made by 1.0.2, then exports with this version
 #   b    imports the archive made by a
+# tests/e2e/browser.php runs in the web containers of a and b and drives the
+# admin page's AJAX calls over HTTP, like a browser.
 # Each site has a web container (Apache, PHP of WP_IMAGE) and a WP-CLI container
 # (PHP of CLI_IMAGE) that share the site files. The plugin runs in the CLI container.
 name: holemi-e2e
@@ -12,6 +14,7 @@ x-old-plugin: &old-plugin { type: bind, source: "${E2E_TMP:-./.e2e-tmp}/old-plug
 x-ini: &ini { type: bind, source: ./php.ini, target: /usr/local/etc/php/conf.d/zz-e2e.ini, read_only: true }
 x-step: &step { type: bind, source: ./cli-step.php, target: /e2e/cli-step.php, read_only: true }
 x-seed: &seed { type: bind, source: ./seed.php, target: /e2e/seed.php, read_only: true }
+x-browser: &browser { type: bind, source: ./browser.php, target: /e2e/browser.php, read_only: true }
 x-db: &db
   WORDPRESS_DB_HOST: db
   WORDPRESS_DB_USER: root
@@ -56,7 +59,7 @@ services:
   a:
     <<: *web
     environment: { <<: *db, WORDPRESS_DB_NAME: a, WORDPRESS_CONFIG_EXTRA: *offline }
-    volumes: [ "vol-a:/var/www/html", *plugin, *ini ]
+    volumes: [ "vol-a:/var/www/html", *plugin, *ini, *browser ]
   a-cli:
     <<: *cli
     environment: { <<: *db, WORDPRESS_DB_NAME: a, WORDPRESS_CONFIG_EXTRA: *offline, HOME: /tmp }
@@ -65,7 +68,7 @@ services:
   b:
     <<: *web
     environment: { <<: *db, WORDPRESS_DB_NAME: b, WORDPRESS_CONFIG_EXTRA: *offline }
-    volumes: [ "vol-b:/var/www/html", *plugin, *ini ]
+    volumes: [ "vol-b:/var/www/html", *plugin, *ini, *browser ]
   b-cli:
     <<: *cli
     environment: { <<: *db, WORDPRESS_DB_NAME: b, WORDPRESS_CONFIG_EXTRA: *offline, HOME: /tmp }

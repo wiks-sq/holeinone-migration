@@ -5,7 +5,7 @@ Tags: migration, migrate, move site, backup, clone
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.0
+Stable tag: 1.1.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -94,6 +94,9 @@ In `wp-content/hole-in-one-migration-<random>/`, a folder whose name contains 96
 Edit `HOLEMI_BUYMEACOFFEE_URL` at the top of `hole-in-one-migration.php`, define it in `wp-config.php`, or use the `holemi_buymeacoffee_url` filter. An empty string hides the box.
 
 == Changelog ==
+
+= 1.1.1 =
+* Fix: in 1.1.0 nothing could be started from the Migration page. Export and import stopped at once with "Your login session expired", and downloading a backup did not work, because the page and the server used different names for their requests.
 
 = 1.1.0 =
 * Changes from the WordPress.org plugin review.
