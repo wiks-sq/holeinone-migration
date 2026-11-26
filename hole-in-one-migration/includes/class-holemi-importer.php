@@ -70,8 +70,8 @@ class HOLEMI_Importer implements HOLEMI_Tar_Handler {
 		$job->state['target'] = array(
 			'home'         => HOLEMI_Util::raw_url( 'home' ),
 			'siteurl'      => HOLEMI_Util::raw_url( 'siteurl' ),
-			'db_home'      => (string) HOLEMI_DB::value( 'SELECT option_value FROM ' . HOLEMI_Util::ident( $wpdb->options ) . " WHERE option_name = 'home'" ),
-			'db_siteurl'   => (string) HOLEMI_DB::value( 'SELECT option_value FROM ' . HOLEMI_Util::ident( $wpdb->options ) . " WHERE option_name = 'siteurl'" ),
+			'db_home'      => HOLEMI_Util::raw_option( 'home' ),
+			'db_siteurl'   => HOLEMI_Util::raw_option( 'siteurl' ),
 			'content_url'  => HOLEMI_Util::raw_content_urls()[0],
 			'uploads_url'  => HOLEMI_Util::raw_content_urls()[1],
 			'abspath'      => HOLEMI_Util::install_dir(),
@@ -84,8 +84,8 @@ class HOLEMI_Importer implements HOLEMI_Tar_Handler {
 			// The uploads location is also a database setting. This site's value
 			// is kept, because the media files are put where this site keeps them.
 			'upload_opts'  => array(
-				'upload_path'     => HOLEMI_DB::value( 'SELECT option_value FROM ' . HOLEMI_Util::ident( $wpdb->options ) . " WHERE option_name = 'upload_path'" ),
-				'upload_url_path' => HOLEMI_DB::value( 'SELECT option_value FROM ' . HOLEMI_Util::ident( $wpdb->options ) . " WHERE option_name = 'upload_url_path'" ),
+				'upload_path'     => HOLEMI_DB::value( 'SELECT option_value FROM %i WHERE option_name = %s', array( $wpdb->options, 'upload_path' ) ),
+				'upload_url_path' => HOLEMI_DB::value( 'SELECT option_value FROM %i WHERE option_name = %s', array( $wpdb->options, 'upload_url_path' ) ),
 			),
 			'prefix'       => $wpdb->prefix,
 			'plugin'       => plugin_basename( HOLEMI_FILE ),
@@ -916,10 +916,10 @@ class HOLEMI_Importer implements HOLEMI_Tar_Handler {
 	 * Set safe session variables for the import.
 	 */
 	private function db_session() {
-		HOLEMI_DB::exec( "SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'" );
-		HOLEMI_DB::exec( 'SET SESSION foreign_key_checks = 0' );
+		HOLEMI_DB::exec( 'SET SESSION sql_mode = %s', array( 'NO_AUTO_VALUE_ON_ZERO' ) );
+		HOLEMI_DB::exec( 'SET SESSION foreign_key_checks = %d', array( 0 ) );
 		try {
-			HOLEMI_DB::exec( 'SET NAMES utf8mb4' );
+			HOLEMI_DB::exec( 'SET NAMES %s', array( 'utf8mb4' ) );
 		} catch ( HOLEMI_Exception $e ) {
 			// Very old MySQL without utf8mb4: keep the WordPress default.
 			unset( $e );
@@ -933,14 +933,18 @@ class HOLEMI_Importer implements HOLEMI_Tar_Handler {
 	 */
 	private function server_caps() {
 		$coll = array();
-		foreach ( HOLEMI_DB::rows( 'SHOW COLLATION' ) as $r ) {
+		foreach ( HOLEMI_DB::rows( 'SHOW COLLATION LIKE %s', array( '%' ) ) as $r ) {
 			$coll[ strtolower( $r[0] ) ] = true;
 		}
 		$eng = array();
-		foreach ( HOLEMI_DB::rows( 'SHOW ENGINES', true ) as $r ) {
-			if ( in_array( strtoupper( $r['Support'] ), array( 'YES', 'DEFAULT' ), true ) ) {
-				$eng[ strtolower( $r['Engine'] ) ] = true;
+		try {
+			foreach ( HOLEMI_DB::rows( 'SELECT ENGINE FROM information_schema.ENGINES WHERE SUPPORT IN (%s, %s)', array( 'YES', 'DEFAULT' ) ) as $r ) {
+				$eng[ strtolower( $r[0] ) ] = true;
 			}
+		} catch ( HOLEMI_Exception $e ) {
+			// No ENGINES table (e.g. WordPress on SQLite in Playground): assume
+			// InnoDB, the engine fix_create() falls back to.
+			$eng = array( 'innodb' => true );
 		}
 		return array( $coll, $eng );
 	}
@@ -1051,7 +1055,10 @@ class HOLEMI_Importer implements HOLEMI_Tar_Handler {
 				continue;
 			}
 			try {
-				HOLEMI_DB::exec( $sql );
+				// A statement of the dump file (migration dump exception, see
+				// HOLEMI_DB::run_dump_statement()); checked above to be one of
+				// the three kinds the export writes.
+				HOLEMI_DB::run_dump_statement( $sql );
 			} catch ( HOLEMI_Exception $e ) {
 				$msg = HOLEMI_Util::plain( $e );
 				if ( false !== stripos( $msg, 'max_allowed_packet' ) || false !== stripos( $msg, 'gone away' ) ) {
@@ -1134,6 +1141,7 @@ class HOLEMI_Importer implements HOLEMI_Tar_Handler {
 	 * Run search & replace until time runs out.
 	 */
 	private function replace() {
+		global $wpdb;
 		$job = $this->job;
 		$s   = &$job->state;
 		$tmp = $s['dbi']['tmp'];
@@ -1141,10 +1149,7 @@ class HOLEMI_Importer implements HOLEMI_Tar_Handler {
 
 		if ( ! isset( $s['rep'] ) ) {
 			$tables = array();
-			$status = array();
-			foreach ( HOLEMI_DB::rows( 'SHOW TABLE STATUS', true ) as $st ) {
-				$status[ $st['Name'] ] = $st;
-			}
+			$status = HOLEMI_DB::table_status( $tmp );
 			foreach ( HOLEMI_DB::tables_with_prefix( $tmp ) as $t ) {
 				$cols  = array();
 				$types = array();
@@ -1158,7 +1163,7 @@ class HOLEMI_Importer implements HOLEMI_Tar_Handler {
 				// Key range of numeric keys, only used to show real progress.
 				$range = null;
 				if ( $pk && $cols && preg_match( '/int/', $types[ $pk[0] ] ) ) {
-					$mm    = HOLEMI_DB::rows( 'SELECT MIN(' . HOLEMI_Util::ident( $pk[0] ) . '), MAX(' . HOLEMI_Util::ident( $pk[0] ) . ') FROM ' . HOLEMI_Util::ident( $t ) );
+					$mm    = HOLEMI_DB::rows( 'SELECT MIN(%i), MAX(%i) FROM %i', array( $pk[0], $pk[0], $t ) );
 					$range = isset( $mm[0][1] ) ? array( (float) $mm[0][0], (float) $mm[0][1] ) : null;
 				}
 				$avg      = isset( $status[ $t ]['Avg_row_length'] ) ? (int) $status[ $t ]['Avg_row_length'] : 0;
@@ -1197,80 +1202,110 @@ class HOLEMI_Importer implements HOLEMI_Tar_Handler {
 				$this->next_table( $r );
 				continue;
 			}
-			$q = HOLEMI_Util::ident( $t['name'] );
+			$table = $t['name'];
 
 			if ( empty( $t['pk'] ) ) {
 				// No primary key: plain SQL REPLACE (rare, e.g. some log tables).
+				// UPDATE %i SET %i = REPLACE(REPLACE(%i, %s, %s), %s, %s) ...
 				foreach ( $t['cols'] as $c ) {
-					$expr = HOLEMI_Util::ident( $c );
+					$expr = '%i';
+					$vals = array( $c );
 					foreach ( $sr->map() as $from => $to ) {
-						$expr = 'REPLACE(' . $expr . ',' . HOLEMI_DB::quote( $from ) . ',' . HOLEMI_DB::quote( $to ) . ')';
+						$expr   = 'REPLACE(' . $expr . ', %s, %s)';
+						$vals[] = $from;
+						$vals[] = $to;
 					}
-					HOLEMI_DB::exec( 'UPDATE ' . $q . ' SET ' . HOLEMI_Util::ident( $c ) . ' = ' . $expr );
+					HOLEMI_DB::exec( 'UPDATE %i SET %i = ' . $expr, array_merge( array( $table, $c ), $vals ) );
 				}
 				$this->next_table( $r );
 				continue;
 			}
 
-			$pk_cols = array_map( array( 'HOLEMI_Util', 'ident' ), $t['pk'] );
-			$order   = implode( ',', $pk_cols );
+			$order   = HOLEMI_DB::idents( count( $t['pk'] ) );
 			$batch   = $job->scaled( $t['batch'], 5 );
 			$window  = $job->scaled( 5000, 200 );
-			$after   = null !== $r['last'] ? HOLEMI_DB::after( $t['pk'], (array) $r['last'] ) : '';
+			$after   = null !== $r['last'] ? HOLEMI_DB::after( $t['pk'], (array) $r['last'] ) : null;
 
 			// 1) End of the next window of rows in key order (index-only, cheap).
 			//    Bounding every query to a window keeps it fast even when few
 			//    rows match, so no single query can run into a timeout.
-			$upper = HOLEMI_DB::rows( 'SELECT ' . $order . ' FROM ' . $q . ( $after ? ' WHERE ' . $after : '' ) . ' ORDER BY ' . $order . ' LIMIT ' . ( $window - 1 ) . ',1' );
-			$upper = $upper ? $upper[0] : null;
+			$query = 'SELECT ' . $order . ' FROM %i';
+			$args  = array_merge( $t['pk'], array( $table ) );
+			if ( $after ) {
+				$query .= ' WHERE ' . $after[0];
+				$args   = array_merge( $args, $after[1] );
+			}
+			$query .= ' ORDER BY ' . $order . ' LIMIT %d, 1';
+			$args   = array_merge( $args, $t['pk'], array( $window - 1 ) );
+			$upper  = HOLEMI_DB::rows( $query, $args );
+			$upper  = $upper ? $upper[0] : null;
 
 			// 2) Rows in that window that contain an old address or path.
+			//    Template and values are built side by side: every table name,
+			//    column name, key value and search string is a placeholder.
 			$where = array();
+			$wargs = array();
 			if ( $after ) {
-				$where[] = $after;
+				$where[] = $after[0];
+				$wargs   = array_merge( $wargs, $after[1] );
 			}
 			if ( null !== $upper ) {
-				$where[] = 'NOT ' . HOLEMI_DB::after( $t['pk'], $upper );
+				$not     = HOLEMI_DB::after( $t['pk'], $upper );
+				$where[] = 'NOT ' . $not[0];
+				$wargs   = array_merge( $wargs, $not[1] );
 			}
 			$likes = array();
 			foreach ( $t['cols'] as $c ) {
 				foreach ( $needles as $nd ) {
-					$likes[] = HOLEMI_Util::ident( $c ) . " LIKE '%" . HOLEMI_Util::like_escape( $nd ) . "%'";
+					$likes[] = '%i LIKE %s';
+					$wargs[] = $c;
+					$wargs[] = '%' . $wpdb->esc_like( $nd ) . '%';
 				}
 			}
 			if ( $likes ) {
 				$where[] = '(' . implode( ' OR ', $likes ) . ')';
 			}
-			$sel  = array_unique( array_merge( $t['pk'], $t['cols'] ) );
-			$sql  = 'SELECT ' . implode( ',', array_map( array( 'HOLEMI_Util', 'ident' ), $sel ) ) . ' FROM ' . $q;
-			$sql .= $where ? ' WHERE ' . implode( ' AND ', $where ) : '';
-			$sql .= ' ORDER BY ' . $order . ' LIMIT ' . $batch;
+			$sel   = array_values( array_unique( array_merge( $t['pk'], $t['cols'] ) ) );
+			$query = 'SELECT ' . HOLEMI_DB::idents( count( $sel ) ) . ' FROM %i';
+			$args  = array_merge( $sel, array( $table ) );
+			if ( $where ) {
+				$query .= ' WHERE ' . implode( ' AND ', $where );
+				$args   = array_merge( $args, $wargs );
+			}
+			$query .= ' ORDER BY ' . $order . ' LIMIT %d';
+			$args   = array_merge( $args, $t['pk'], array( $batch ) );
 
-			$rows = HOLEMI_DB::rows( $sql, true );
+			$rows = HOLEMI_DB::rows( $query, $args, true );
 			// One transaction per batch: one disk sync instead of one per row
 			// (often 10-50x faster on InnoDB). A crash rolls the batch back.
-			HOLEMI_DB::exec( 'START TRANSACTION' );
+			HOLEMI_DB::begin();
 			foreach ( $rows as $row ) {
-				$set = array();
+				$set  = array();
+				$args = array( $table );
 				foreach ( $t['cols'] as $c ) {
 					if ( null === $row[ $c ] ) {
 						continue;
 					}
 					$new = $sr->run( $row[ $c ] );
 					if ( $new !== $row[ $c ] ) {
-						$set[] = HOLEMI_Util::ident( $c ) . ' = ' . HOLEMI_DB::quote( $new );
+						$set[]  = '%i = %s';
+						$args[] = $c;
+						$args[] = $new;
 					}
 				}
 				if ( $set ) {
 					$cond = array();
 					foreach ( $t['pk'] as $k ) {
-						$cond[] = HOLEMI_Util::ident( $k ) . ' = ' . HOLEMI_DB::quote( $row[ $k ] );
+						$cond[] = '%i = %s';
+						$args[] = $k;
+						$args[] = (string) $row[ $k ];
 					}
-					HOLEMI_DB::exec( 'UPDATE ' . $q . ' SET ' . implode( ', ', $set ) . ' WHERE ' . implode( ' AND ', $cond ) );
+					// UPDATE %i SET %i = %s, ... WHERE %i = %s AND ...
+					HOLEMI_DB::exec( 'UPDATE %i SET ' . implode( ', ', $set ) . ' WHERE ' . implode( ' AND ', $cond ), $args );
 					$r['rows']++;
 				}
 			}
-			HOLEMI_DB::exec( 'COMMIT' );
+			HOLEMI_DB::commit();
 			$n = count( $rows );
 			if ( $n >= $batch ) {
 				// More matches inside this window: continue after the last one.
@@ -1327,43 +1362,46 @@ class HOLEMI_Importer implements HOLEMI_Tar_Handler {
 	 * Final adjustments in the temporary tables before they go live.
 	 */
 	private function fixups() {
+		global $wpdb;
 		$s    = $this->job->state;
 		$tmp  = $s['dbi']['tmp'];
 		$src  = $s['manifest']['prefix'];
 		$dst  = $s['target']['prefix'];
-		$opt  = HOLEMI_Util::ident( $tmp . 'options' );
-		$um   = HOLEMI_Util::ident( $tmp . 'usermeta' );
+		$opt  = $tmp . 'options';
+		$um   = $tmp . 'usermeta';
 
-		if ( ! in_array( $tmp . 'options', HOLEMI_DB::tables_with_prefix( $tmp ), true ) ) {
+		if ( ! in_array( $opt, HOLEMI_DB::tables_with_prefix( $tmp ), true ) ) {
 			throw new HOLEMI_Exception( esc_html__( 'The imported database has no options table. The archive does not look like a WordPress database.', 'hole-in-one-migration' ) );
 		}
 
 		// Table prefix changed: rename prefix-dependent keys.
 		if ( $src !== $dst ) {
-			if ( in_array( $tmp . 'usermeta', HOLEMI_DB::tables_with_prefix( $tmp ), true ) ) {
-				HOLEMI_DB::exec( 'UPDATE ' . $um . ' SET meta_key = CONCAT(' . HOLEMI_DB::quote( $dst ) . ', SUBSTRING(meta_key, ' . ( strlen( $src ) + 1 ) . ")) WHERE meta_key LIKE '" . HOLEMI_Util::like_escape( $src ) . "%'" );
+			if ( in_array( $um, HOLEMI_DB::tables_with_prefix( $tmp ), true ) ) {
+				HOLEMI_DB::exec(
+					'UPDATE %i SET meta_key = CONCAT(%s, SUBSTRING(meta_key, %d)) WHERE meta_key LIKE %s',
+					array( $um, $dst, strlen( $src ) + 1, $wpdb->esc_like( $src ) . '%' )
+				);
 			}
-			HOLEMI_DB::exec( 'DELETE FROM ' . $opt . ' WHERE option_name = ' . HOLEMI_DB::quote( $dst . 'user_roles' ) );
-			HOLEMI_DB::exec( 'UPDATE ' . $opt . ' SET option_name = ' . HOLEMI_DB::quote( $dst . 'user_roles' ) . ' WHERE option_name = ' . HOLEMI_DB::quote( $src . 'user_roles' ) );
+			HOLEMI_DB::exec( 'DELETE FROM %i WHERE option_name = %s', array( $opt, $dst . 'user_roles' ) );
+			HOLEMI_DB::exec( 'UPDATE %i SET option_name = %s WHERE option_name = %s', array( $opt, $dst . 'user_roles', $src . 'user_roles' ) );
 			$this->job->log( sprintf( 'Table prefix changed from %s to %s; user roles and capabilities updated.', $src, $dst ) );
 		}
 
 		// This site's address and the plugin must stay intact.
-		HOLEMI_DB::exec( 'UPDATE ' . $opt . ' SET option_value = ' . HOLEMI_DB::quote( $s['target']['db_home'] ) . " WHERE option_name = 'home'" );
-		HOLEMI_DB::exec( 'UPDATE ' . $opt . ' SET option_value = ' . HOLEMI_DB::quote( $s['target']['db_siteurl'] ) . " WHERE option_name = 'siteurl'" );
+		HOLEMI_DB::exec( 'UPDATE %i SET option_value = %s WHERE option_name = %s', array( $opt, $s['target']['db_home'], 'home' ) );
+		HOLEMI_DB::exec( 'UPDATE %i SET option_value = %s WHERE option_name = %s', array( $opt, $s['target']['db_siteurl'], 'siteurl' ) );
 
 		// Media files were put into this site's uploads folder (see install_files()),
 		// so this site's upload settings must stay too.
 		foreach ( $s['target']['upload_opts'] as $name => $value ) {
-			$was = HOLEMI_DB::value( 'SELECT option_value FROM ' . $opt . ' WHERE option_name = ' . HOLEMI_DB::quote( $name ) );
+			$was = HOLEMI_DB::value( 'SELECT option_value FROM %i WHERE option_name = %s', array( $opt, $name ) );
 			if ( (string) $was !== (string) $value ) {
-				HOLEMI_DB::exec( 'DELETE FROM ' . $opt . ' WHERE option_name = ' . HOLEMI_DB::quote( $name ) );
-				HOLEMI_DB::exec( 'INSERT INTO ' . $opt . ' (option_name, option_value, autoload) VALUES (' . HOLEMI_DB::quote( $name ) . ', ' . HOLEMI_DB::quote( (string) $value ) . ", 'yes')" );
+				$this->put_option( $opt, $name, (string) $value );
 				$this->job->log( sprintf( 'Kept this site\'s %1$s setting (%2$s) instead of the old site\'s (%3$s): the media files are in this site\'s uploads folder.', $name, '' === (string) $value ? 'empty' : $value, $was ) );
 			}
 		}
 
-		$active  = HOLEMI_DB::value( 'SELECT option_value FROM ' . $opt . " WHERE option_name = 'active_plugins'" );
+		$active  = HOLEMI_DB::value( 'SELECT option_value FROM %i WHERE option_name = %s', array( $opt, 'active_plugins' ) );
 		$plugins = is_string( $active ) ? @unserialize( $active, array( 'allowed_classes' => false ) ) : array(); // phpcs:ignore
 		$plugins = is_array( $plugins ) ? $plugins : array();
 		$mine    = $s['target']['plugin'];
@@ -1379,11 +1417,13 @@ class HOLEMI_Importer implements HOLEMI_Tar_Handler {
 		if ( ! in_array( $mine, $plugins, true ) ) {
 			$plugins[] = $mine;
 		}
-		HOLEMI_DB::exec( 'DELETE FROM ' . $opt . " WHERE option_name = 'active_plugins'" );
-		HOLEMI_DB::exec( 'INSERT INTO ' . $opt . " (option_name, option_value, autoload) VALUES ('active_plugins', " . HOLEMI_DB::quote( serialize( $plugins ) ) . ", 'yes')" ); // phpcs:ignore
+		$this->put_option( $opt, 'active_plugins', serialize( $plugins ) ); // phpcs:ignore
 
 		// Caches that contain old paths/addresses are rebuilt automatically.
-		HOLEMI_DB::exec( 'DELETE FROM ' . $opt . " WHERE option_name = 'rewrite_rules' OR option_name LIKE '\\_transient\\_%' OR option_name LIKE '\\_site\\_transient\\_%'" );
+		HOLEMI_DB::exec(
+			'DELETE FROM %i WHERE option_name = %s OR option_name LIKE %s OR option_name LIKE %s',
+			array( $opt, 'rewrite_rules', $wpdb->esc_like( '_transient_' ) . '%', $wpdb->esc_like( '_site_transient_' ) . '%' )
+		);
 
 		$notice = array(
 			'time'     => time(),
@@ -1392,8 +1432,21 @@ class HOLEMI_Importer implements HOLEMI_Tar_Handler {
 			'flush'    => 1,
 			'job'      => $this->job->id, // Marker: proves this job's swap happened.
 		);
-		HOLEMI_DB::exec( 'DELETE FROM ' . $opt . " WHERE option_name = 'holemi_post_import'" );
-		HOLEMI_DB::exec( 'INSERT INTO ' . $opt . " (option_name, option_value, autoload) VALUES ('holemi_post_import', " . HOLEMI_DB::quote( serialize( $notice ) ) . ", 'yes')" ); // phpcs:ignore
+		$this->put_option( $opt, 'holemi_post_import', serialize( $notice ) ); // phpcs:ignore
+	}
+
+	/**
+	 * Set an option in the imported (not yet live) options table. The
+	 * WordPress option functions cannot be used: they work on the live table.
+	 *
+	 * @param string $table Options table.
+	 * @param string $name  Option name.
+	 * @param string $value Option value (already serialized when needed).
+	 * @throws HOLEMI_Exception On error.
+	 */
+	private function put_option( $table, $name, $value ) {
+		HOLEMI_DB::exec( 'DELETE FROM %i WHERE option_name = %s', array( $table, $name ) );
+		HOLEMI_DB::exec( 'INSERT INTO %i (option_name, option_value, autoload) VALUES (%s, %s, %s)', array( $table, $name, $value, 'yes' ) );
 	}
 
 	/* --------------------------------------------------------------------
@@ -1434,25 +1487,28 @@ class HOLEMI_Importer implements HOLEMI_Tar_Handler {
 		);
 		$this->db_session();
 
-		$check = HOLEMI_DB::value( 'SELECT COUNT(*) FROM ' . HOLEMI_Util::ident( $tmp . 'options' ) . " WHERE option_name = 'siteurl'" );
+		$check = HOLEMI_DB::value( 'SELECT COUNT(*) FROM %i WHERE option_name = %s', array( $tmp . 'options', 'siteurl' ) );
 		if ( 1 > (int) $check ) {
 			throw new HOLEMI_Exception( esc_html__( 'Safety check failed: the imported options table has no site address. Nothing was changed.', 'hole-in-one-migration' ) );
 		}
 
-		$pairs = array();
+		// RENAME TABLE %i TO %i, %i TO %i, ...
+		$names = array();
 		foreach ( $old as $t ) {
-			$pairs[] = HOLEMI_Util::ident( $t ) . ' TO ' . HOLEMI_Util::ident( $bak . substr( $t, strlen( $dst ) ) );
+			$names[] = $t;
+			$names[] = $bak . substr( $t, strlen( $dst ) );
 		}
 		foreach ( $new as $t ) {
 			$final = $dst . substr( $t, strlen( $tmp ) );
 			if ( strlen( $final ) > 64 ) {
 				throw new HOLEMI_Exception( esc_html( sprintf( 'Table name too long: %s', $final ) ) );
 			}
-			$pairs[] = HOLEMI_Util::ident( $t ) . ' TO ' . HOLEMI_Util::ident( $final );
+			$names[] = $t;
+			$names[] = $final;
 		}
 		$job->log( sprintf( 'Swapping %d imported tables in (one atomic operation)…', count( $new ) ) );
 		$job->save(); // Checkpoint right before the point of no return.
-		HOLEMI_DB::exec( 'RENAME TABLE ' . implode( ', ', $pairs ) );
+		HOLEMI_DB::exec( 'RENAME TABLE ' . implode( ', ', array_fill( 0, count( $names ) / 2, '%i TO %i' ) ), $names );
 		$s['swapped'] = true;
 		$job->save(); // ...and right after it.
 		$this->after_swap();
@@ -1474,7 +1530,7 @@ class HOLEMI_Importer implements HOLEMI_Tar_Handler {
 		if ( empty( $s['dbi']['tmp'] ) || HOLEMI_DB::tables_with_prefix( $s['dbi']['tmp'] ) ) {
 			return false;
 		}
-		$v = HOLEMI_DB::value( 'SELECT option_value FROM ' . HOLEMI_Util::ident( $s['target']['prefix'] . 'options' ) . " WHERE option_name = 'holemi_post_import'" );
+		$v = HOLEMI_DB::value( 'SELECT option_value FROM %i WHERE option_name = %s', array( $s['target']['prefix'] . 'options', 'holemi_post_import' ) );
 		$v = is_string( $v ) ? @unserialize( $v, array( 'allowed_classes' => false ) ) : null; // phpcs:ignore
 		return is_array( $v ) && isset( $v['job'] ) && $v['job'] === $job->id;
 	}
@@ -1511,7 +1567,7 @@ class HOLEMI_Importer implements HOLEMI_Tar_Handler {
 		$backups = empty( $s['bak'] ) ? array() : HOLEMI_DB::tables_with_prefix( $s['bak'] );
 		foreach ( array_chunk( $backups, 50 ) as $chunk ) {
 			try {
-				HOLEMI_DB::exec( 'DROP TABLE IF EXISTS ' . implode( ', ', array_map( array( 'HOLEMI_Util', 'ident' ), $chunk ) ) );
+				HOLEMI_DB::exec( 'DROP TABLE IF EXISTS ' . HOLEMI_DB::idents( count( $chunk ), ', ' ), $chunk );
 			} catch ( HOLEMI_Exception $e ) {
 				$job->log( 'Could not remove old tables: ' . HOLEMI_Util::plain( $e ), 'warning' );
 			}
@@ -1861,9 +1917,9 @@ class HOLEMI_Importer implements HOLEMI_Tar_Handler {
 			if ( ! empty( $job->state['dbi']['tmp'] ) ) {
 				$tmp = $job->state['dbi']['tmp'];
 				try {
-					HOLEMI_DB::exec( 'SET SESSION foreign_key_checks = 0' );
+					HOLEMI_DB::exec( 'SET SESSION foreign_key_checks = %d', array( 0 ) );
 					foreach ( array_chunk( HOLEMI_DB::tables_with_prefix( $tmp ), 50 ) as $chunk ) {
-						HOLEMI_DB::exec( 'DROP TABLE IF EXISTS ' . implode( ', ', array_map( array( 'HOLEMI_Util', 'ident' ), $chunk ) ) );
+						HOLEMI_DB::exec( 'DROP TABLE IF EXISTS ' . HOLEMI_DB::idents( count( $chunk ), ', ' ), $chunk );
 					}
 				} catch ( HOLEMI_Exception $e ) {
 					unset( $e );

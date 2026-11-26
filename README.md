@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/WordPress-5.6%2B-21759b?logo=wordpress&logoColor=white" alt="WordPress 5.6+">
+  <img src="https://img.shields.io/badge/WordPress-6.2%2B-21759b?logo=wordpress&logoColor=white" alt="WordPress 6.2+">
   <img src="https://img.shields.io/badge/PHP-7.4%20to%208.5-777bb4?logo=php&logoColor=white" alt="PHP 7.4 to 8.5">
   <img src="https://img.shields.io/badge/license-GPLv2%2B-blue" alt="License GPLv2 or later">
   <img src="https://img.shields.io/badge/price-free%20forever-3ddc97" alt="Free forever">
@@ -91,12 +91,15 @@ Yes. Inside are `wp-content/`, `hio-database.sql` and `hio-manifest.json` (plus 
 
 How the chunking, resume logic, archive writers and atomic database swap work, plus the full test notes: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-**Automated tests.** Every push and pull request runs [CI](.github/workflows/ci.yml): a PHP 7.4–8.5 syntax check, a check that the version numbers match, and a full migration test in Docker on the newest WordPress with PHP 8.5 (plus WordPress.org Plugin Check) and on WordPress 6.1 with PHP 7.4. The migration test builds a site with tricky content, exports it with version 1.0.2, imports it with the current code, then exports and imports again. It also cancels an import just before the database swap and checks that nothing changed, and moves the media outside `wp-content`. Finally it uses the admin page over HTTP the way a browser does (login cookie, nonce, the AJAX actions in `admin.js`): export and download, then a chunked upload and import, including the logout at the database swap. Then it compares every table and file. To run it locally (needs Docker):
+**Automated tests.** Every push and pull request runs [CI](.github/workflows/ci.yml): a PHP 7.4–8.5 syntax check, a check that the version numbers match, and a full migration test in Docker on the newest WordPress with PHP 8.5 (plus WordPress.org Plugin Check) and on WordPress 6.2 (the oldest supported version) with PHP 7.4, and a smoke test on WordPress Playground (WordPress on SQLite, as the plugin reviewers use it). The migration test builds a site with tricky content (including `%` and `_` next to the site address, and a table with a two-column text and number primary key), exports it with version 1.0.2, imports it with the current code, then exports and imports again, with small batches so every table is read in many batches. It also cancels an import just before the database swap and checks that nothing changed, and moves the media outside `wp-content`. Finally it uses the admin page over HTTP the way a browser does (login cookie, nonce, the AJAX actions in `admin.js`): export and download, then a chunked upload and import, including the logout at the database swap. Then it compares every table and file. To run it locally (needs Docker):
 
 ```sh
 tests/e2e/run.sh                    # seeded test site, about 2 minutes
 tests/e2e/run.sh my-site.tar.gz     # or a real site archive
+tests/playground/run.sh             # Playground smoke test (needs Node.js)
 ```
+
+On Playground, the export works fully. The import runs up to the database swap and then stops, because WordPress on SQLite cannot rename tables. The test checks the imported tables, then cancels and checks that the site was not changed.
 
 **Releases.** Push a tag that matches the plugin version (`git tag v1.1.1 && git push origin v1.1.1`). The [release workflow](.github/workflows/release.yml) runs the full CI on that commit, checks the version numbers, builds `hole-in-one-migration.zip` and publishes a GitHub release with it. To build the zip yourself: `bin/build-zip.sh`.
 

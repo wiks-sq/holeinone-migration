@@ -64,9 +64,21 @@ function http( $url, array $opt = array() ) {
 	if ( isset( $opt['headers'] ) ) {
 		curl_setopt( $ch, CURLOPT_HTTPHEADER, $opt['headers'] );
 	}
+	// 'save' streams the body into a file: an archive of a real site can be
+	// larger than PHP's memory_limit. The returned body is then empty.
+	$fh = null;
+	if ( isset( $opt['save'] ) ) {
+		$fh = fopen( $opt['save'], 'wb' );
+		curl_setopt( $ch, CURLOPT_RETURNTRANSFER, false );
+		curl_setopt( $ch, CURLOPT_FILE, $fh );
+	}
 	$body = curl_exec( $ch );
 	$code = curl_getinfo( $ch, CURLINFO_RESPONSE_CODE );
 	curl_close( $ch );
+	if ( $fh ) {
+		fclose( $fh );
+		$body = '';
+	}
 	return array( $code, (string) $body, $hdr );
 }
 
@@ -173,11 +185,12 @@ if ( 'export' === $cmd ) {
 		done();
 	}
 	$url = $r['data']['result']['php'];
-	list( $code, $zip, $h ) = http( $url );
-	check( 200 === $code && 'PK' === substr( $zip, 0, 2 ), "download link (holemi_download) sends the archive (HTTP $code, " . strlen( $zip ) . ' bytes)' );
-	file_put_contents( $arg, $zip );
+	list( $code ) = http( $url, array( 'save' => $arg ) );
+	clearstatcache();
+	$head = (string) file_get_contents( $arg, false, null, 0, 100 );
+	check( 200 === $code && 'PK' === substr( $head, 0, 2 ), "download link (holemi_download) sends the archive (HTTP $code, " . filesize( $arg ) . ' bytes)' );
 	list( $code, $part ) = http( $url, array( 'headers' => array( 'Range: bytes=0-99' ) ) );
-	check( 206 === $code && substr( $zip, 0, 100 ) === $part, "download supports resuming (Range: HTTP $code, " . strlen( $part ) . ' bytes)' );
+	check( 206 === $code && $head === $part, "download supports resuming (Range: HTTP $code, " . strlen( $part ) . ' bytes)' );
 	list( $code ) = http( $url, array( 'anonymous' => true ) );
 	check( 200 !== $code, "download needs a login (HTTP $code without one)" );
 	list( $code, $log ) = http( $r['data']['logUrl'] );

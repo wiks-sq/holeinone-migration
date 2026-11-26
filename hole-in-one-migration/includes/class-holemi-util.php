@@ -61,7 +61,11 @@ class HOLEMI_Util {
 	 * Folders that WordPress lets a site move out of wp-content, by role. Each
 	 * is resolved the way WordPress resolves it, so custom locations (set in
 	 * wp-config.php or by the upload_path option) are exported and restored
-	 * correctly.
+	 * correctly. Themes and uploads come from get_theme_root() and
+	 * wp_upload_dir(). WordPress has no function that returns the plugins or
+	 * must-use plugins folder (plugin_dir_path() only gives a plugin's own
+	 * folder), so WP_PLUGIN_DIR and WPMU_PLUGIN_DIR are read here and nowhere
+	 * else.
 	 *
 	 * @return string[] role => absolute path.
 	 */
@@ -243,24 +247,42 @@ class HOLEMI_Util {
 		if ( defined( $const ) && constant( $const ) ) {
 			return untrailingslashit( (string) constant( $const ) );
 		}
-		global $wpdb;
-		return untrailingslashit( (string) HOLEMI_DB::value( 'SELECT option_value FROM ' . self::ident( $wpdb->options ) . ' WHERE option_name = ' . HOLEMI_DB::quote( $which ) . ' LIMIT 1' ) );
+		return untrailingslashit( self::raw_option( $which ) );
 	}
 
 	/**
-	 * Content and uploads addresses without filters (see raw_url()).
+	 * An option read straight from this site's options table: no filters, no
+	 * object cache and no wp-config.php constants (see raw_url()).
+	 *
+	 * @param string $name Option name.
+	 * @return string
+	 */
+	public static function raw_option( $name ) {
+		global $wpdb;
+		return (string) HOLEMI_DB::value( 'SELECT option_value FROM %i WHERE option_name = %s LIMIT 1', array( $wpdb->options, $name ) );
+	}
+
+	/**
+	 * Content and uploads addresses. The content address comes from
+	 * content_url(), which applies the scheme of the current request
+	 * (set_url_scheme()), so an HTTPS site never gets HTTP addresses. The
+	 * uploads address is taken before the "upload_dir" filter, which
+	 * media-offload plugins use to point it at a CDN or cloud bucket: those
+	 * addresses must not be rewritten to the new site.
 	 *
 	 * @return string[] content_url, uploads_url.
 	 */
 	public static function raw_content_urls() {
-		$content = defined( 'WP_CONTENT_URL' ) ? untrailingslashit( WP_CONTENT_URL ) : untrailingslashit( content_url() );
+		$content = untrailingslashit( content_url() );
 		$up      = function_exists( '_wp_upload_dir' ) ? _wp_upload_dir() : wp_upload_dir( null, false );
 		return array( $content, untrailingslashit( $up['baseurl'] ) );
 	}
 
 	/**
-	 * Escape a value for a MySQL string literal. Also escapes new lines so a
-	 * statement always fits on one line in the dump file.
+	 * Escape a value for a MySQL string literal in the SQL dump file that the
+	 * export writes (like mysqldump does). Also escapes new lines so a
+	 * statement always fits on one line in the dump file. Only used to write
+	 * that file: queries this plugin runs use $wpdb->prepare() (see HOLEMI_DB).
 	 *
 	 * @param string $v Value.
 	 * @return string
@@ -281,23 +303,14 @@ class HOLEMI_Util {
 	}
 
 	/**
-	 * Quote a MySQL identifier.
+	 * Quote a MySQL identifier for the SQL dump file (see sql_escape()).
+	 * Queries this plugin runs use the %i placeholder of $wpdb->prepare().
 	 *
 	 * @param string $name Identifier.
 	 * @return string
 	 */
 	public static function ident( $name ) {
 		return '`' . str_replace( '`', '``', $name ) . '`';
-	}
-
-	/**
-	 * Escape a value for use inside LIKE '...'.
-	 *
-	 * @param string $v Value.
-	 * @return string
-	 */
-	public static function like_escape( $v ) {
-		return self::sql_escape( addcslashes( $v, '_%\\' ) );
 	}
 
 	/**
