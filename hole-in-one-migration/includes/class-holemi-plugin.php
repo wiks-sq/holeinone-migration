@@ -197,6 +197,7 @@ class HOLEMI_Plugin {
 					'wrongFile'     => __( 'That is not the same file that was being uploaded. Please choose %s.', 'hole-in-one-migration' ),
 					'gaveUp'        => __( 'The server did not respond after many attempts. Your progress is saved: click "Retry" to continue, or check the troubleshooting tips in the Help tab.', 'hole-in-one-migration' ),
 					'expired'       => __( 'Your login session expired. Reload this page and click "Resume" – your progress is saved.', 'hole-in-one-migration' ),
+					'networkHint'   => __( 'The browser got no answer from the server. Try again in a private (incognito) window or in another browser: data the browser kept from the old site, such as a service worker, can block these requests, especially when you reach the new site through a hosts file entry before it is live.', 'hole-in-one-migration' ),
 				),
 			)
 		);

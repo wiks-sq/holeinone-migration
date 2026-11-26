@@ -18,7 +18,7 @@
 #  5. Media moved outside wp-content on site a arrive in b's own uploads folder.
 #
 # Environment: WP_IMAGE (default php8.5-apache), CLI_IMAGE (default cli),
-# PLUGIN_CHECK (1), OLD_REF (c1984fc = 1.0.2), E2E_LOG (tests/e2e/e2e-results.log).
+# WP_VERSION (replaces the image's WordPress on the test sites, e.g. 6.2), PLUGIN_CHECK (1), OLD_REF (c1984fc = 1.0.2), E2E_LOG (tests/e2e/e2e-results.log).
 # On failure, debug logs and job logs are kept in tests/e2e/artifacts/.
 # Exit code: 0 when every check passed.
 set -uo pipefail
@@ -108,6 +108,9 @@ for s in $INSTALL; do
     [ $i = 90 ] && { dt ps -a; dt logs --tail=30 db $s; exit 1; }
     sleep 2
   done
+  if [ -n "${WP_VERSION:-}" ] && [ $s != pc ]; then
+    dt exec -T $s-cli wp core download --version="$WP_VERSION" --force --skip-content >/dev/null 2>&1 || abort "could not download WordPress $WP_VERSION on $s"
+  fi
   wps $s core install --url=http://localhost:$(port_of $s) --title="e2e $s" --admin_user=admin --admin_password=admin --admin_email=admin@example.com --skip-email >/dev/null || abort "WordPress install failed on $s"
 done
 for s in $SITES; do
@@ -238,6 +241,16 @@ for s in a b; do
 done
 
 echo "== 4. The admin page over HTTP, as the browser uses it"
+if [ -n "$ARCHIVE" ]; then
+  # Sites a and b now have the users of the imported site: make sure the test login exists.
+  # A database from an older WordPress also sends every admin page to "Database Update
+  # Required" (wp-admin/upgrade.php) until it is updated, as the site owner would after a move.
+  for s in a b; do
+    wps $s core update-db >/dev/null 2>&1 || fail "could not update the database of site $s to this WordPress version"
+    if wps $s user get admin --field=ID >/dev/null 2>&1; then wps $s user update admin --user_pass=admin --role=administrator >/dev/null
+    else wps $s user create admin e2e-admin@example.invalid --role=administrator --user_pass=admin >/dev/null; fi || fail "could not set up the test login on site $s"
+  done
+fi
 # Runs the AJAX calls of assets/admin.js against Apache with a real login
 # cookie and nonce. The CLI steps above call the classes directly, so only
 # this catches a mismatch between the script and the server.

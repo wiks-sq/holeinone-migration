@@ -63,6 +63,9 @@ defined( 'ABSPATH' ) || exit;
 		<dt><?php esc_html_e( 'It shows "retrying" many times', 'hole-in-one-migration' ); ?></dt>
 		<dd><?php esc_html_e( 'The server is slow or busy. Let it continue: the plugin reduces the chunk size by itself. If it gives up, click "Retry". You can also lower "Work time per request" to 5–8 seconds in Settings.', 'hole-in-one-migration' ); ?></dd>
 
+		<dt><?php esc_html_e( 'It says "Network error" and the import or export does not start', 'hole-in-one-migration' ); ?></dt>
+		<dd><?php esc_html_e( 'The browser got no answer at all, which usually means the browser itself blocked the request. Try again in a private (incognito) window or in another browser. This happens especially when you reach the new site through a hosts file entry before it is live: the browser may still keep data of the old site at the same address, such as a service worker. To fix your normal browser, remove that site\'s service worker (developer tools, Application, Service workers, Unregister) and clear its site data.', 'hole-in-one-migration' ); ?></dd>
+
 		<dt><?php esc_html_e( 'I closed the browser / my computer went to sleep', 'hole-in-one-migration' ); ?></dt>
 		<dd><?php esc_html_e( 'Open the Migration page again and click "Resume" at the top. For an interrupted upload, choose the same file again: it continues where it stopped.', 'hole-in-one-migration' ); ?></dd>
 

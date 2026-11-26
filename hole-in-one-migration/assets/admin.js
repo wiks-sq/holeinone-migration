@@ -31,6 +31,11 @@
 			return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
 		});
 	}
+	// A request that got no answer at all (not a timeout) adds a hint, because
+	// it is often the browser, not the server: see T.networkHint.
+	function why(r) {
+		return r.message + (r.noAnswer && T.networkHint ? ' ' + T.networkHint : '');
+	}
 	function size(b) {
 		var u = ['B', 'KB', 'MB', 'GB', 'TB'], i = 0;
 		while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
@@ -112,7 +117,8 @@
 				});
 			})
 			.catch(function (err) {
-				return { ok: false, code: 'network', http: 0, message: (err && err.name === 'AbortError') ? 'Request timed out' : 'Network error' };
+				var timeout = !!(err && err.name === 'AbortError');
+				return { ok: false, code: 'network', http: 0, noAnswer: !timeout, message: timeout ? 'Request timed out' : 'Network error' };
 			})
 			.then(function (r) { if (timer) { clearTimeout(timer); } return r; });
 	}
@@ -230,7 +236,7 @@
 					if (r.code === 'gone') { panel.note(r.message, 'error'); panel.buttons([]); done(); return; }
 					attempt++;
 					if (attempt > 12) {
-						panel.note(T.gaveUp + ' (' + r.message + ')', 'error');
+						panel.note(T.gaveUp + ' (' + why(r) + ')', 'error');
 						panel.buttons([
 							{ label: 'Retry', primary: true, click: function () { panel.note(''); attempt = 0; retry = true; busy(true); panel.buttons([cancelButton(panel, job)]); loop(); } },
 							cancelButton(panel, job)
@@ -326,7 +332,7 @@
 						chunk = Math.max(131072, Math.floor(chunk / 2));
 					}
 					if (attempt > 15) {
-						panel.note(T.gaveUp + ' (' + r.message + ')', 'error');
+						panel.note(T.gaveUp + ' (' + why(r) + ')', 'error');
 						panel.buttons([
 							{ label: 'Retry', primary: true, click: function () { attempt = 0; panel.note(''); busy(true); panel.buttons([cancelButton(panel, job)]); next(); } },
 							cancelButton(panel, job)
@@ -364,7 +370,7 @@
 		panel.progress(0, 'Starting…');
 		api(action, fields).then(function (r) {
 			if (!r.ok) {
-				panel.note(r.message, 'error');
+				panel.note(why(r), 'error');
 				return;
 			}
 			onJob(r.data, panel);

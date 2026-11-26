@@ -57,9 +57,12 @@ jobs:
             wp_image: php8.5-apache
             cli_image: cli
             plugin_check: '1'
-          - name: WordPress 6.1, PHP 7.4
+          # The oldest supported WordPress (6.2: wpdb::prepare() %i) on PHP 7.4.
+          # The php7.4 images ship 6.1, so run.sh downloads 6.2 over it.
+          - name: WordPress 6.2, PHP 7.4
             wp_image: php7.4-apache
             cli_image: cli-php7.4
+            wp_version: '6.2'
             plugin_check: '0'
     steps:
       - uses: actions/checkout@v4
@@ -70,6 +73,7 @@ jobs:
           WP_IMAGE: ${{ matrix.wp_image }}
           CLI_IMAGE: ${{ matrix.cli_image }}
           PLUGIN_CHECK: ${{ matrix.plugin_check }}
+          WP_VERSION: ${{ matrix.wp_version }}
         run: tests/e2e/run.sh
       - name: Keep logs
         if: always()

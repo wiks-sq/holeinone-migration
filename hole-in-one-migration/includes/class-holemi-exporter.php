@@ -357,10 +357,7 @@ class HOLEMI_Exporter {
 		global $wpdb;
 		$tables = array();
 		$total  = 0;
-		$status = array();
-		foreach ( HOLEMI_DB::rows( 'SHOW TABLE STATUS', true ) as $r ) {
-			$status[ $r['Name'] ] = $r;
-		}
+		$status = HOLEMI_DB::table_status( $wpdb->prefix );
 		foreach ( HOLEMI_DB::tables_with_prefix( $wpdb->prefix ) as $t ) {
 			$cols     = HOLEMI_DB::columns( $t );
 			$pk       = HOLEMI_DB::primary_key( $t );
@@ -444,11 +441,10 @@ class HOLEMI_Exporter {
 		while ( $db['ti'] < count( $db['tables'] ) && ! $job->should_stop() ) {
 			$t     = $db['tables'][ $db['ti'] ];
 			$name  = $t['name'];
-			$qname = HOLEMI_Util::ident( $name );
 			$tok   = HOLEMI_Util::ident( self::PREFIX_TOKEN . substr( $name, $plen ) );
 
 			if ( ! $db['created'] ) {
-				$row    = HOLEMI_DB::rows( 'SHOW CREATE TABLE ' . $qname );
+				$row    = HOLEMI_DB::rows( 'SHOW CREATE TABLE %i', array( $name ) );
 				$create = isset( $row[0][1] ) ? $row[0][1] : '';
 				if ( '' === $create ) {
 					throw new HOLEMI_Exception( esc_html( 'Could not read structure of table ' . $name ) );
@@ -492,14 +488,22 @@ class HOLEMI_Exporter {
 				}
 				$pk_idx[] = $i;
 			}
-			$sql = 'SELECT ' . $names . ' FROM ' . $qname;
+			// Query template with placeholders; every table name, column name
+			// and key value goes into $args and through $wpdb->prepare().
+			$query = 'SELECT ' . HOLEMI_DB::idents( count( $col_names ) ) . ' FROM %i';
+			$args  = array_merge( $col_names, array( $name ) );
 			if ( $pk_idx ) {
 				if ( null !== $db['last'] ) {
-					$sql .= ' WHERE ' . HOLEMI_DB::after( $t['pk'], (array) $db['last'] );
+					list( $after, $after_args ) = HOLEMI_DB::after( $t['pk'], (array) $db['last'] );
+					$query                     .= ' WHERE ' . $after;
+					$args                       = array_merge( $args, $after_args );
 				}
-				$sql .= ' ORDER BY ' . implode( ',', array_map( array( 'HOLEMI_Util', 'ident' ), $t['pk'] ) ) . ' LIMIT ' . $batch;
+				$query .= ' ORDER BY ' . HOLEMI_DB::idents( count( $t['pk'] ) ) . ' LIMIT %d';
+				$args   = array_merge( $args, $t['pk'], array( $batch ) );
 			} else {
-				$sql .= ' LIMIT ' . (int) $db['offset'] . ',' . $batch;
+				$query .= ' LIMIT %d, %d';
+				$args[] = (int) $db['offset'];
+				$args[] = $batch;
 			}
 
 			// Rows are streamed (unbuffered): memory use stays constant.
@@ -507,7 +511,8 @@ class HOLEMI_Exporter {
 			$buf  = '';
 			$last = null;
 			$n    = HOLEMI_DB::each(
-				$sql,
+				$query,
+				$args,
 				function ( $r ) use ( $fp, $head, $types, $pk_idx, &$buf, &$last ) {
 					$vals = array();
 					foreach ( $r as $i => $v ) {
@@ -562,17 +567,6 @@ class HOLEMI_Exporter {
 	 * ------------------------------------------------------------------ */
 
 	/**
-	 * Raw option from the options table (ignores constants/filters).
-	 *
-	 * @param string $name Option.
-	 * @return string
-	 */
-	private static function raw_option( $name ) {
-		global $wpdb;
-		return (string) HOLEMI_DB::value( 'SELECT option_value FROM ' . HOLEMI_Util::ident( $wpdb->options ) . ' WHERE option_name = ' . HOLEMI_DB::quote( $name ) . ' LIMIT 1' );
-	}
-
-	/**
 	 * Write the manifest and initialize the archive state.
 	 *
 	 * @param HOLEMI_Job $job Job.
@@ -592,8 +586,8 @@ class HOLEMI_Exporter {
 			'contents'       => $contents,
 			'home'           => HOLEMI_Util::raw_url( 'home' ),
 			'siteurl'        => HOLEMI_Util::raw_url( 'siteurl' ),
-			'db_home'        => self::raw_option( 'home' ),
-			'db_siteurl'     => self::raw_option( 'siteurl' ),
+			'db_home'        => HOLEMI_Util::raw_option( 'home' ),
+			'db_siteurl'     => HOLEMI_Util::raw_option( 'siteurl' ),
 			'content_url'    => HOLEMI_Util::raw_content_urls()[0],
 			'abspath'        => HOLEMI_Util::install_dir(),
 			'content_dir'    => HOLEMI_Util::content_dir(),
@@ -607,7 +601,7 @@ class HOLEMI_Exporter {
 			'prefix'         => $wpdb->prefix,
 			'wp_version'     => $wp_version,
 			'php_version'    => PHP_VERSION,
-			'mysql_version'  => (string) HOLEMI_DB::value( 'SELECT VERSION()' ),
+			'mysql_version'  => (string) $wpdb->db_server_info(),
 			'multisite'      => is_multisite(),
 			'plugin_dir'     => dirname( plugin_basename( HOLEMI_FILE ) ),
 			'files'          => isset( $s['scan']['files'] ) ? $s['scan']['files'] : 0,

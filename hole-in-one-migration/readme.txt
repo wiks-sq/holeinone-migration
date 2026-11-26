@@ -2,10 +2,10 @@
 Contributors: wikssq
 Donate link: https://buymeacoffee.com/wikssq
 Tags: migration, migrate, move site, backup, clone
-Requires at least: 5.6
+Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.1
+Stable tag: 1.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -73,6 +73,10 @@ Cache folders and cache drop-ins, debug logs, archives of other backup plugins, 
 
 The server is slow or overloaded. Let it run: the plugin automatically halves the work per request after every failure. You can also lower "Work time per request" in Settings.
 
+= It says "Network error" and nothing starts =
+
+The browser got no answer at all, which usually means the browser blocked the request itself. Try again in a private (incognito) window or in another browser. This happens especially when you reach the new site through a hosts file entry before it is live: the browser may still keep data of the old site at the same address, such as a service worker. In your normal browser, remove that site's service worker (developer tools, Application, Service workers, Unregister) and clear its site data.
+
 = The download stops or is slow =
 
 Start it again: downloads go through WordPress for logged-in administrators only and support resuming, so the browser or a download manager continues where it stopped. You can also fetch the file from the storage folder's `backups/` folder by FTP.
@@ -94,6 +98,14 @@ In `wp-content/hole-in-one-migration-<random>/`, a folder whose name contains 96
 Edit `HOLEMI_BUYMEACOFFEE_URL` at the top of `hole-in-one-migration.php`, define it in `wp-config.php`, or use the `holemi_buymeacoffee_url` filter. An empty string hides the box.
 
 == Changelog ==
+
+= 1.2.0 =
+* Changes from the second WordPress.org plugin review.
+* Every database query of the plugin now goes through `$wpdb->prepare()`, with placeholders for all table names, column names and values. The only statements run as they are, are the ones of the SQL dump inside the archive.
+* The content address is taken from `content_url()`, so it uses the scheme (http or https) of the site.
+* Uninstalling finds other copies of the plugin with `get_plugins()`.
+* Requires WordPress 6.2 or newer (for the identifier placeholder of `$wpdb->prepare()`).
+* When the browser gets no answer at all ("Network error"), the message now suggests trying a private window or another browser, and the Help tab explains why (for example a service worker left by the old site when the new site is reached through a hosts file entry).
 
 = 1.1.1 =
 * Fix: in 1.1.0 nothing could be started from the Migration page. Export and import stopped at once with "Your login session expired", and downloading a backup did not work, because the page and the server used different names for their requests.
