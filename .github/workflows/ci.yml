@@ -86,11 +86,26 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  playground:
+    name: WordPress Playground (SQLite)
+    needs: [lint, version]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      # WordPress on SQLite, as the plugin reviewers use it: every query takes
+      # the $wpdb fallback of HOLEMI_DB instead of the mysqli link.
+      - name: Run tests/playground/run.sh
+        run: tests/playground/run.sh
+
   # One fixed name for branch protection to require, whatever the matrix holds.
   all:
     name: All checks passed
     if: always()
-    needs: [lint, version, e2e]
+    needs: [lint, version, e2e, playground]
     runs-on: ubuntu-latest
     steps:
       - name: Every job succeeded

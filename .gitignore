@@ -4,3 +4,5 @@
 wporg_reply/
 tests/e2e/e2e-*.log
 tests/e2e/artifacts/
+*.tar.gz
+*.tgz

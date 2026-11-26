@@ -6,18 +6,21 @@
 #   tests/e2e/run.sh site.tar.gz     a real site archive instead (made by any version)
 #
 #  1. WordPress.org Plugin Check on a clean WordPress          (skip: PLUGIN_CHECK=0)
-#  2. A site built by seed.php is exported with plugin 1.0.2 (from git history,
+#  2. A site built by seed.php and tricky.php is exported with plugin 1.0.2 (from git history,
 #     OLD_REF) and imported into site a with this version. With an archive
 #     argument, that archive is imported instead.
 #  3. Site a is exported with this version; the import into site b is first
 #     cancelled just before the database swap (b must be unchanged), then run fully;
-#     tables, row counts, every file and the addresses are compared.
+#     tables, row counts, every file and the addresses are compared. Steps 2
+#     and 3 use small batches (E2E_FACTOR), so tables are read in many batches.
 #  4. Through the admin page over HTTP, as the browser does it (browser.php):
 #     export site a and download it, upload it to site b in chunks and import
 #     it, including the logout at the database switch.
 #  5. Media moved outside wp-content on site a arrive in b's own uploads folder.
 #
 # Environment: WP_IMAGE (default php8.5-apache), CLI_IMAGE (default cli),
+# E2E_FACTOR (batch scale for steps 2-3, default 0.05; 1 with an archive),
+# E2E_JOB_TIMEOUT (seconds per job, default 600; 14400 with an archive),
 # WP_VERSION (replaces the image's WordPress on the test sites, e.g. 6.2), PLUGIN_CHECK (1), OLD_REF (c1984fc = 1.0.2), E2E_LOG (tests/e2e/e2e-results.log).
 # On failure, debug logs and job logs are kept in tests/e2e/artifacts/.
 # Exit code: 0 when every check passed.
@@ -33,7 +36,7 @@ TMP=$E2E_TMP
 ART=$HERE/artifacts
 exec > >(tee "${LOG:-$HERE/e2e-results.log}") 2>&1
 dt() { docker compose -f "$HERE/docker-compose.yml" "$@"; }
-wps() { local s=$1; shift; dt exec -T "$s-cli" wp --skip-plugins --skip-themes "$@"; }
+wps() { local s=$1; shift; dt exec -T -e E2E_FACTOR="${E2E_FACTOR:-}" "$s-cli" wp --skip-plugins --skip-themes "$@"; }
 FAIL=0
 pass() { echo "PASS  $*"; }
 fail() { echo "FAIL  $*"; FAIL=1; }
@@ -77,6 +80,9 @@ run_job() { # site job
       [ $errs -ge 5 ] && { fail "job on site $site keeps failing: $msg"; return 1; }
     else errs=0; fi
     [ $n -gt 3000 ] && { fail "job $job on $site did not finish"; return 1; }
+    # A job that stops making progress (e.g. a batch cursor that never moves
+    # on) would otherwise run into the CI timeout without a report.
+    [ $((SECONDS-t0)) -gt "${E2E_JOB_TIMEOUT:-600}" ] && { fail "job $job on $site did not finish within ${E2E_JOB_TIMEOUT:-600} s (last: $out)"; return 1; }
   done
   echo "   finished in $n steps, $((SECONDS-t0)) s"
 }
@@ -130,11 +136,21 @@ if [ "${PLUGIN_CHECK:-1}" = 1 ]; then
   else fail "could not install Plugin Check"; fi
 fi
 
+# Steps 2 and 3 run with small batches (cli-step.php), so the export and the
+# search & replace read every table in many batches; steps 4 and 5 use the
+# plugin's own batch sizes.
+# A real site archive keeps the plugin's own batch sizes and gets more time per job.
+if [ -n "$ARCHIVE" ]; then
+  export E2E_FACTOR=${E2E_FACTOR:-1} E2E_JOB_TIMEOUT=${E2E_JOB_TIMEOUT:-14400}
+else
+  export E2E_FACTOR=${E2E_FACTOR:-0.05}
+fi
 IMPA=$(wps a eval-file /e2e/cli-step.php dir import | tail -1)
 [[ "$IMPA" =~ /wp-content/hole-in-one-migration-[a-f0-9]{24}/import$ ]] && pass "storage folder has a random name" || fail "unexpected storage folder: $IMPA"
 if [ -z "$ARCHIVE" ]; then
   echo "== 2. Seeded site, exported with plugin 1.0.2, imported into site a"
   wps old eval-file /e2e/seed.php || abort "seeding the old site failed"
+  wps old eval-file /e2e/tricky.php seed || abort "seeding the tricky content failed"
   v=$(esc_count old 8083)
   [ "$v" -ge 100 ] 2>/dev/null && pass "control: seeded site has JSON-escaped addresses in $v posts" || fail "control: seeded site has JSON-escaped addresses in $v posts"
   JOB=$(wps old eval-file /e2e/cli-step.php export both tar.gz | tail -1)
@@ -228,6 +244,9 @@ if [ -z "$ARCHIVE" ]; then
   [ "$v" -ge 100 ] 2>/dev/null && pass "JSON-escaped addresses (http:\\/\\/) rewritten ($v posts)" || fail "JSON-escaped addresses rewritten in $v posts"
   v=$(wps b eval 'global $wpdb; $bad = 0; foreach ( $wpdb->get_col( "SELECT data FROM {$wpdb->prefix}e2e_keyed" ) as $d ) { $u = maybe_unserialize( $d ); if ( ! is_array( $u ) || 0 !== strpos( $u["u"], "http://localhost:8085/" ) ) { $bad++; } } echo $bad;')
   [ "$v" = 0 ] && pass "6000 serialized rows of a custom table intact" || fail "$v broken rows in the custom table"
+  out=$(wps b eval-file /e2e/tricky.php check 2>&1); echo "$out"
+  echo "$out" | grep -q '^FAIL' && FAIL=1
+  echo "$out" | grep -q '^PASS' || fail "tricky.php check printed no results"
   [ "$(wps b option get stylesheet)" = e2e-child ] && pass "child theme still active" || fail "active theme is $(wps b option get stylesheet)"
   wps b option get active_plugins --format=json | grep -q 'e2e-demo' && pass "demo plugin still active" || fail "demo plugin not active"
   dt exec -T b-cli test -f wp-content/mu-plugins/e2e-mu.php && pass "mu-plugin migrated" || fail "mu-plugin missing"
@@ -240,6 +259,7 @@ for s in a b; do
   [ -z "$log" ] && pass "site $s: no PHP notices from the plugin" || { fail "site $s: PHP notices from the plugin:"; echo "$log"; }
 done
 
+unset E2E_FACTOR
 echo "== 4. The admin page over HTTP, as the browser uses it"
 if [ -n "$ARCHIVE" ]; then
   # Sites a and b now have the users of the imported site: make sure the test login exists.

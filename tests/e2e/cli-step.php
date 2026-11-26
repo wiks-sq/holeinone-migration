@@ -11,7 +11,8 @@
  *   wp eval-file cli-step.php dir <work|backups|import>
  *   wp eval-file cli-step.php cancel <job>
  *
- * Run with --skip-plugins, so the plugin is loaded here.
+ * Run with --skip-plugins, so the plugin is loaded here. With the environment
+ * variable E2E_FACTOR (0.05 to 1), batches are scaled down by that factor.
  *
  * @package HoleInOneMigration
  */
@@ -75,6 +76,12 @@ if ( 'done' !== $e2e_job->state['phase'] ) {
 		$e2e_job->log( 'Retrying after error.' );
 	}
 	$e2e_job->begin_step( ! empty( $args[2] ) );
+	// E2E_FACTOR (run.sh): smaller batches than the plugin would choose, so
+	// tables are read in many batches (as on a slow host after retries).
+	$e2e_factor = (float) getenv( 'E2E_FACTOR' );
+	if ( $e2e_factor > 0 && isset( $e2e_job->state['factor'] ) ) {
+		$e2e_job->state['factor'] = min( (float) $e2e_job->state['factor'], $e2e_factor );
+	}
 	try {
 		if ( 'exp' === $e2e_job->state['kind'] ) {
 			$e2e_exp_c::step( $e2e_job );

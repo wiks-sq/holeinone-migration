@@ -937,8 +937,14 @@ class HOLEMI_Importer implements HOLEMI_Tar_Handler {
 			$coll[ strtolower( $r[0] ) ] = true;
 		}
 		$eng = array();
-		foreach ( HOLEMI_DB::rows( 'SELECT ENGINE FROM information_schema.ENGINES WHERE SUPPORT IN (%s, %s)', array( 'YES', 'DEFAULT' ) ) as $r ) {
-			$eng[ strtolower( $r[0] ) ] = true;
+		try {
+			foreach ( HOLEMI_DB::rows( 'SELECT ENGINE FROM information_schema.ENGINES WHERE SUPPORT IN (%s, %s)', array( 'YES', 'DEFAULT' ) ) as $r ) {
+				$eng[ strtolower( $r[0] ) ] = true;
+			}
+		} catch ( HOLEMI_Exception $e ) {
+			// No ENGINES table (e.g. WordPress on SQLite in Playground): assume
+			// InnoDB, the engine fix_create() falls back to.
+			$eng = array( 'innodb' => true );
 		}
 		return array( $coll, $eng );
 	}
